@@ -92,17 +92,37 @@ impl Matcher {
             return;
         }
 
-        for match_ in
-            self.prefilter_iter(haystacks)
-                .filter_map(|(index, haystack, skipped_chunks)| {
-                    self.smith_waterman_one(
-                        haystack,
-                        (index as u32) + haystack_index_offset,
-                        skipped_chunks == 0,
-                    )
-                })
-        {
-            matches.push(match_);
+        let needle = self.needle.as_bytes();
+        let min_haystack_len = self
+            .config
+            .max_typos
+            .map(|max| needle.len().saturating_sub(max as usize))
+            .unwrap_or(0);
+
+        for (index, haystack_str) in haystacks.iter().enumerate() {
+            let haystack = haystack_str.as_ref().as_bytes();
+            if haystack.len() < min_haystack_len {
+                continue;
+            }
+
+            let (matched, skipped_chunks) =
+                self.config
+                    .max_typos
+                    .map_or((true, 0), |max_typos| {
+                        self.prefilter.match_haystack(haystack, max_typos)
+                    });
+            if !matched {
+                continue;
+            }
+
+            let haystack = &haystack[skipped_chunks * 16..];
+            if let Some(match_) = self.smith_waterman_one(
+                haystack,
+                (index as u32) + haystack_index_offset,
+                skipped_chunks == 0,
+            ) {
+                matches.push(match_);
+            }
         }
     }
 
@@ -121,18 +141,38 @@ impl Matcher {
             return;
         }
 
-        for match_ in
-            self.prefilter_iter(haystacks)
-                .filter_map(|(index, haystack, skipped_chunks)| {
-                    self.smith_waterman_indices_one(
-                        haystack,
-                        skipped_chunks,
-                        (index as u32) + haystack_index_offset,
-                        skipped_chunks == 0,
-                    )
-                })
-        {
-            matches.push(match_);
+        let needle = self.needle.as_bytes();
+        let min_haystack_len = self
+            .config
+            .max_typos
+            .map(|max| needle.len().saturating_sub(max as usize))
+            .unwrap_or(0);
+
+        for (index, haystack_str) in haystacks.iter().enumerate() {
+            let haystack = haystack_str.as_ref().as_bytes();
+            if haystack.len() < min_haystack_len {
+                continue;
+            }
+
+            let (matched, skipped_chunks) =
+                self.config
+                    .max_typos
+                    .map_or((true, 0), |max_typos| {
+                        self.prefilter.match_haystack(haystack, max_typos)
+                    });
+            if !matched {
+                continue;
+            }
+
+            let haystack = &haystack[skipped_chunks * 16..];
+            if let Some(match_) = self.smith_waterman_indices_one(
+                haystack,
+                skipped_chunks,
+                (index as u32) + haystack_index_offset,
+                skipped_chunks == 0,
+            ) {
+                matches.push(match_);
+            }
         }
     }
 

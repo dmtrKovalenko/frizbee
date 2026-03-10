@@ -54,6 +54,7 @@ impl<'a> AlignmentPathIter<'a> {
         score_matrix: &'a Matrix<Simd256>,
         match_masks: &'a Matrix<Simd256>,
         needle_len: usize,
+        haystack_chunks: usize,
         skipped_chunks: usize,
         score: u16,
         max_typos: Option<u16>,
@@ -61,7 +62,7 @@ impl<'a> AlignmentPathIter<'a> {
         let col_idx = Self::get_col_idx(
             score_matrix,
             needle_len,
-            score_matrix.haystack_chunks,
+            haystack_chunks,
             score,
         );
 

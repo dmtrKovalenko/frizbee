@@ -5,7 +5,8 @@ use crate::prefilter::{case_needle, scalar};
 
 #[derive(Debug, Clone)]
 pub struct PrefilterSSE {
-    needle: Vec<(u8, u8)>,
+    needle_scalar: Vec<(u8, u8)>,
+    needle_simd: Vec<(__m128i, __m128i)>,
 }
 
 impl PrefilterSSE {
@@ -14,8 +15,15 @@ impl PrefilterSSE {
     #[inline]
     #[target_feature(enable = "sse2")]
     pub fn new(needle: &[u8]) -> Self {
+        let needle_scalar = case_needle(needle);
+        let needle_simd = needle_scalar
+            .iter()
+            .map(|&(c1, c2)| (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)))
+            .collect();
+
         Self {
-            needle: case_needle(needle),
+            needle_scalar,
+            needle_simd,
         }
     }
 
@@ -40,7 +48,7 @@ impl PrefilterSSE {
         match len {
             0 => return (true, 0),
             1..=7 => {
-                return (scalar::match_haystack(&self.needle, haystack), 0);
+                return (scalar::match_haystack(&self.needle_scalar, haystack), 0);
             }
             _ => {}
         };
@@ -48,11 +56,8 @@ impl PrefilterSSE {
         let mut can_skip_chunks = true;
         let mut skipped_chunks = 0;
 
-        let mut needle_iter = self
-            .needle
-            .iter()
-            .map(|&(c1, c2)| (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)));
-        let mut needle_char = needle_iter.next().unwrap();
+        let mut needle_iter = self.needle_simd.iter();
+        let mut needle_char = *needle_iter.next().unwrap();
 
         for start in (0..len).step_by(16) {
             let haystack_chunk = unsafe { overlapping_load(haystack, start, len) };
@@ -73,7 +78,7 @@ impl PrefilterSSE {
                         skipped_chunks = start / 16;
                     }
                     can_skip_chunks = false;
-                    needle_char = next_needle_char;
+                    needle_char = *next_needle_char;
                 } else {
                     return (true, skipped_chunks);
                 }
@@ -99,18 +104,15 @@ impl PrefilterSSE {
             0 => return (true, 0),
             1..=7 => {
                 return (
-                    scalar::match_haystack_typos(&self.needle, haystack, max_typos),
+                    scalar::match_haystack_typos(&self.needle_scalar, haystack, max_typos),
                     0,
                 );
             }
             _ => {}
         };
 
-        let mut needle_iter = self
-            .needle
-            .iter()
-            .map(|&(c1, c2)| (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)));
-        let mut needle_char = needle_iter.next().unwrap();
+        let mut needle_iter = self.needle_simd.iter();
+        let mut needle_char = *needle_iter.next().unwrap();
 
         let mut typos = 0;
         loop {
@@ -133,7 +135,7 @@ impl PrefilterSSE {
 
                     // Progress to next needle char, if available
                     if let Some(next_needle_char) = needle_iter.next() {
-                        needle_char = next_needle_char;
+                        needle_char = *next_needle_char;
                     } else {
                         return (true, 0);
                     }
@@ -146,7 +148,7 @@ impl PrefilterSSE {
             }
 
             if let Some(next_needle_char) = needle_iter.next() {
-                needle_char = next_needle_char;
+                needle_char = *next_needle_char;
             } else {
                 return (true, 0);
             }

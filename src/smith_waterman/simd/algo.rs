@@ -25,6 +25,9 @@ pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Si
     pub scoring: Scoring,
     pub score_matrix: Matrix<Simd256>,
     pub match_masks: Matrix<Simd256>,
+    /// Actual haystack chunks for the most recent score_haystack call.
+    /// The matrix stride is always MAX_HAYSTACK_CHUNKS for zero-free reuse.
+    pub haystack_chunks: usize,
     phantom: PhantomData<Simd256>,
 }
 
@@ -38,6 +41,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             scoring: scoring.clone(),
             score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
+            haystack_chunks: 0,
             phantom: PhantomData,
         }
     }
@@ -105,13 +109,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
         let scoring = &self.scoring;
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
+        self.haystack_chunks = haystack_chunks;
 
+        // Matrix stride is fixed at MAX_HAYSTACK_CHUNKS from construction.
+        // Row 0 and column 0 are always zero (never written by the inner loop),
+        // so no re-zeroing is needed between calls.
         let score_matrix = &mut self.score_matrix;
-        score_matrix.set_haystack_chunks(haystack_chunks);
-        score_matrix.zero();
         let match_masks = &mut self.match_masks;
-        match_masks.set_haystack_chunks(haystack_chunks);
-        match_masks.zero();
 
         unsafe {
             // Constants
@@ -251,6 +255,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[cfg(test)]
     pub fn print_score_matrix(&self, haystack: &str) {
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
+        let stride = self.score_matrix.haystack_chunks;
         let score_matrix = self.score_matrix.as_slice();
 
         print!("     ");
@@ -260,13 +265,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         println!();
 
         for (i, row) in score_matrix
-            .chunks_exact(haystack_chunks)
+            .chunks_exact(stride)
             .enumerate()
             .skip(1)
             .take(self.needle.len())
         {
             print!("{:<4} ", self.needle.chars().nth(i - 1).unwrap_or(' '));
-            for col in row.iter().skip(1).flatten() {
+            for col in row.iter().take(haystack_chunks).skip(1).flatten() {
                 print!("{:<4} ", col);
             }
             println!();
