@@ -218,7 +218,7 @@ impl PartialEq for MatchIndices {
 }
 impl Eq for MatchIndices {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
@@ -298,7 +298,7 @@ impl UnicodeMatching {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Scoring {
@@ -310,7 +310,6 @@ pub struct Scoring {
     pub gap_open_penalty: u16,
     /// Penalty for extending a gap (deletion/insertion)
     pub gap_extend_penalty: u16,
-
     /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
     pub prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter

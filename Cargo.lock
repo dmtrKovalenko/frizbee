@@ -278,18 +278,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
-name = "frizbee"
-version = "0.10.0"
-dependencies = [
- "criterion",
- "nucleo",
- "proptest",
- "rand 0.10.0",
- "rand_distr",
- "serde",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -434,6 +422,18 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+
+[[package]]
+name = "neo_frizbee"
+version = "0.10.0"
+dependencies = [
+ "criterion",
+ "nucleo",
+ "proptest",
+ "rand 0.10.0",
+ "rand_distr",
+ "serde",
+]
 
 [[package]]
 name = "nucleo"
