@@ -28,6 +28,10 @@ pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Si
     /// Actual haystack chunks for the most recent score_haystack call.
     /// The matrix stride is always MAX_HAYSTACK_CHUNKS for zero-free reuse.
     pub haystack_chunks: usize,
+    /// Column position (0-based haystack byte offset) where the best alignment ends.
+    /// Only meaningful when the `match_end_col` feature is enabled.
+    #[cfg(feature = "match_end_col")]
+    pub end_col: u16,
     phantom: PhantomData<Simd256>,
 }
 
@@ -42,6 +46,8 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             haystack_chunks: 0,
+            #[cfg(feature = "match_end_col")]
+            end_col: 0,
             phantom: PhantomData,
         }
     }
@@ -57,8 +63,15 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[inline(always)]
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
-                .map(|(score, _)| score);
+            let result = match_greedy(self.needle.as_bytes(), haystack, &self.scoring);
+            #[cfg(feature = "match_end_col")]
+            {
+                self.end_col = result
+                    .as_ref()
+                    .and_then(|(_, indices)| indices.last().copied())
+                    .unwrap_or(0) as u16;
+            }
+            return result.map(|(score, _)| score);
         }
 
         let score = self.score_haystack(haystack);
@@ -102,9 +115,15 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
-                .map(|(score, _)| score)
-                .unwrap_or(0);
+            let result = match_greedy(self.needle.as_bytes(), haystack, &self.scoring);
+            #[cfg(feature = "match_end_col")]
+            {
+                self.end_col = result
+                    .as_ref()
+                    .and_then(|(_, indices)| indices.last().copied())
+                    .unwrap_or(0) as u16;
+            }
+            return result.map(|(score, _)| score).unwrap_or(0);
         }
 
         let scoring = &self.scoring;
@@ -135,6 +154,10 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             let mut prev_chunk_char_is_delimiter_mask = Simd128::zero();
             let mut prev_chunk_is_lower_mask = Simd128::zero();
             let mut max_scores = Simd256::zero();
+            #[cfg(feature = "match_end_col")]
+            let mut end_col_max: u16 = 0;
+            #[cfg(feature = "match_end_col")]
+            let mut end_col_val: u16 = 0;
 
             // TODO: try doing N needle chars per haystack chunk for better cache locality
             for (col_idx, haystack) in (0..(haystack_chunks - 1)).map(|col_idx| {
@@ -244,8 +267,22 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                 }
 
                 // because we do this after the loop, we're guaranteed to be on the last row
+                #[cfg(feature = "match_end_col")]
+                {
+                    let chunk_max = row_scores.smax_u16();
+                    if chunk_max > end_col_max {
+                        end_col_max = chunk_max;
+                        let lane = row_scores.idx_u16(chunk_max);
+                        end_col_val = ((col_idx - 1) * 16 + lane) as u16;
+                    }
+                }
                 max_scores = max_scores.max_u16(row_scores);
                 prefix_bonus_masked = Simd256::zero();
+            }
+
+            #[cfg(feature = "match_end_col")]
+            {
+                self.end_col = end_col_val;
             }
 
             max_scores.smax_u16()

@@ -22,6 +22,8 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
                 index: index as u32,
                 score: 0,
                 exact: false,
+                #[cfg(feature = "match_end_col")]
+                match_end_col: 0,
             })
             .collect();
     }

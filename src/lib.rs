@@ -103,6 +103,8 @@
 //!             index: index as u32,
 //!             score,
 //!             exact,
+//!             #[cfg(feature = "match_end_col")]
+//!             match_end_col: 0,
 //!         })
 //!     })
 //!     .collect::<Vec<_>>();
@@ -133,6 +135,10 @@ pub struct Match {
     pub index: u32,
     /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
+    /// Column position (0-based haystack byte offset) where the best alignment ends.
+    /// Only populated when the `match_end_col` feature is enabled.
+    #[cfg(feature = "match_end_col")]
+    pub match_end_col: u16,
 }
 
 impl Match {
@@ -141,6 +147,8 @@ impl Match {
             score: 0,
             index: index as u32,
             exact: false,
+            #[cfg(feature = "match_end_col")]
+            match_end_col: 0,
         }
     }
 }

@@ -75,6 +75,18 @@ impl SmithWatermanMatcher {
         }
     }
 
+    #[cfg(feature = "match_end_col")]
+    pub fn end_col(&self) -> u16 {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(m) => m.0.end_col,
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(m) => m.0.end_col,
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(m) => m.0.end_col,
+        }
+    }
+
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -351,6 +363,26 @@ mod tests {
     #[test]
     fn test_score_continuous_beats_capitalization() {
         assert!(get_score("fo", "foo") > get_score("fo", "faOo"));
+    }
+
+    #[cfg(feature = "match_end_col")]
+    fn get_end_col(needle: &str, haystack: &str) -> u16 {
+        let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
+        matcher.match_haystack(haystack.as_bytes(), None);
+        matcher.end_col()
+    }
+
+    #[test]
+    #[cfg(feature = "match_end_col")]
+    fn test_end_col_basic() {
+        // "abc" in "abcdef" should end at column 2 (0-indexed byte position of 'c')
+        assert_eq!(get_end_col("abc", "abcdef"), 2);
+        // "a" in "abc" should end at column 0
+        assert_eq!(get_end_col("a", "abc"), 0);
+        // "c" in "abc" should end at column 2
+        assert_eq!(get_end_col("c", "abc"), 2);
+        // "def" in "abcdef" should end at column 5
+        assert_eq!(get_end_col("def", "abcdef"), 5);
     }
 
     #[test]
