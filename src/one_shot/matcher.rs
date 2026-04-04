@@ -107,12 +107,9 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) =
-                self.config
-                    .max_typos
-                    .map_or((true, 0), |max_typos| {
-                        self.prefilter.match_haystack(haystack, max_typos)
-                    });
+            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter.match_haystack(haystack, max_typos)
+            });
             if !matched {
                 continue;
             }
@@ -156,12 +153,9 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) =
-                self.config
-                    .max_typos
-                    .map_or((true, 0), |max_typos| {
-                        self.prefilter.match_haystack(haystack, max_typos)
-                    });
+            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter.match_haystack(haystack, max_typos)
+            });
             if !matched {
                 continue;
             }
@@ -274,7 +268,7 @@ impl Matcher {
             score,
             exact,
             #[cfg(feature = "match_end_col")]
-            match_end_col: self.smith_waterman.end_col(),
+            match_end_col: self.smith_waterman.match_end_col(haystack),
         })
     }
 

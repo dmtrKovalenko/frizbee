@@ -75,18 +75,6 @@ impl SmithWatermanMatcher {
         }
     }
 
-    #[cfg(feature = "match_end_col")]
-    pub fn end_col(&self) -> u16 {
-        match self {
-            #[cfg(target_arch = "x86_64")]
-            Self::AVX2(m) => m.0.end_col,
-            #[cfg(target_arch = "x86_64")]
-            Self::SSE(m) => m.0.end_col,
-            #[cfg(target_arch = "aarch64")]
-            Self::NEON(m) => m.0.end_col,
-        }
-    }
-
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -95,6 +83,18 @@ impl SmithWatermanMatcher {
             Self::SSE(matcher) => unsafe { matcher.score_haystack(haystack) },
             #[cfg(target_arch = "aarch64")]
             Self::NEON(matcher) => unsafe { matcher.score_haystack(haystack) },
+        }
+    }
+
+    #[cfg(feature = "match_end_col")]
+    pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe { matcher.match_end_col(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe { matcher.match_end_col(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.match_end_col(haystack) },
         }
     }
 
@@ -210,6 +210,16 @@ macro_rules! define_matcher {
             #[target_feature(enable = $feature)]
             pub unsafe fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
                 self.0.score_haystack(haystack)
+            }
+
+            #[doc = concat!(
+                "Get the index of the final needle char in the haystack\n\n",
+                "# Safety\n\n",
+                "Caller must ensure that the target feature `", $feature, "` is available"
+            )]
+            #[target_feature(enable = $feature)]
+            pub unsafe fn match_end_col(&self, haystack: &[u8]) -> u16 {
+                self.0.match_end_col(haystack)
             }
 
             #[cfg(test)]
@@ -369,7 +379,7 @@ mod tests {
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
         matcher.match_haystack(haystack.as_bytes(), None);
-        matcher.end_col()
+        matcher.match_end_col(haystack.as_bytes())
     }
 
     #[test]
