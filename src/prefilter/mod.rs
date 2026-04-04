@@ -64,21 +64,25 @@ pub enum Prefilter {
     SSE(x86_64::PrefilterSSE),
     #[cfg(target_arch = "aarch64")]
     NEON(aarch64::PrefilterNEON),
+    Scalar(scalar::PrefilterScalar),
 }
 
 impl Prefilter {
     pub fn new(needle: &[u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
         if x86_64::PrefilterAVX::is_available() {
-            Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) })
-        } else if x86_64::PrefilterSSE::is_available() {
-            Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) })
-        } else {
-            panic!("no prefilter algorithm available due to missing SSE2 support");
+            return Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) });
+        }
+        #[cfg(target_arch = "x86_64")]
+        if x86_64::PrefilterSSE::is_available() {
+            return Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) });
         }
 
         #[cfg(target_arch = "aarch64")]
-        Prefilter::NEON(aarch64::PrefilterNEON::new(needle))
+        return Prefilter::NEON(aarch64::PrefilterNEON::new(needle));
+
+        #[cfg(not(target_arch = "aarch64"))]
+        Prefilter::Scalar(scalar::PrefilterScalar::new(needle))
     }
 
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
@@ -108,6 +112,8 @@ impl Prefilter {
             (Prefilter::NEON(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "aarch64")]
             (Prefilter::NEON(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            (Prefilter::Scalar(p), 0) => p.match_haystack(haystack),
+            (Prefilter::Scalar(p), _) => p.match_haystack_typos(haystack, max_typos),
         }
     }
 }
@@ -318,8 +324,19 @@ mod tests {
     }
 
     fn match_haystack_generic(needle: &str, haystack: &str, max_typos: u16) -> bool {
+        use crate::prefilter::scalar::PrefilterScalar;
+
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
+
+        let scalar_result = {
+            let prefilter = PrefilterScalar::new(needle.as_bytes());
+            if max_typos > 0 {
+                prefilter.match_haystack_typos(haystack, max_typos).0
+            } else {
+                prefilter.match_haystack(haystack).0
+            }
+        };
 
         #[cfg(target_arch = "x86_64")]
         return {
@@ -345,21 +362,44 @@ mod tests {
                 avx_result, sse_result,
                 "avx and sse results should be the same"
             );
+            assert_eq!(
+                avx_result, scalar_result,
+                "avx and scalar results should be the same"
+            );
             avx_result
         };
 
         #[cfg(target_arch = "aarch64")]
-        return unsafe {
-            use crate::prefilter::aarch64::PrefilterNEON;
+        return {
+            let neon_result = unsafe {
+                use crate::prefilter::aarch64::PrefilterNEON;
 
+                if max_typos > 0 {
+                    PrefilterNEON::new(needle.as_bytes())
+                        .match_haystack_typos(haystack, max_typos)
+                        .0
+                } else {
+                    PrefilterNEON::new(needle.as_bytes())
+                        .match_haystack(haystack)
+                        .0
+                }
+            };
+            assert_eq!(
+                neon_result, scalar_result,
+                "neon and scalar results should be the same"
+            );
+            neon_result
+        };
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        return {
+            use crate::prefilter::PrefilterScalar;
+
+            let prefilter = PrefilterScalar::new(needle.as_bytes());
             if max_typos > 0 {
-                PrefilterNEON::new(needle.as_bytes())
-                    .match_haystack_typos(haystack, max_typos)
-                    .0
+                prefilter.match_haystack_typos(haystack, max_typos).0
             } else {
-                PrefilterNEON::new(needle.as_bytes())
-                    .match_haystack(haystack)
-                    .0
+                prefilter.match_haystack(haystack).0
             }
         };
     }
