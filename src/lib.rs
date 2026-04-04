@@ -104,7 +104,7 @@
 //!             score,
 //!             exact,
 //!             #[cfg(feature = "match_end_col")]
-//!             match_end_col: 0,
+//!             end_col: 0,
 //!         })
 //!     })
 //!     .collect::<Vec<_>>();
