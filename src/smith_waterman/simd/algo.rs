@@ -57,8 +57,8 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[inline(always)]
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            let result = match_greedy(self.needle.as_bytes(), haystack, &self.scoring);
-            return result.map(|(score, _)| score);
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .map(|(score, _)| score);
         }
 
         let score = self.score_haystack(haystack);
@@ -102,8 +102,9 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            let result = match_greedy(self.needle.as_bytes(), haystack, &self.scoring);
-            return result.map(|(score, _)| score).unwrap_or(0);
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .map(|(score, _)| score)
+                .unwrap_or(0);
         }
 
         let scoring = &self.scoring;
