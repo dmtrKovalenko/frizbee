@@ -138,7 +138,7 @@ pub struct Match {
     /// Column position (0-based haystack byte offset) where the best alignment ends.
     /// Only populated when the `match_end_col` feature is enabled.
     #[cfg(feature = "match_end_col")]
-    pub match_end_col: u16,
+    pub end_col: u16,
 }
 
 impl Match {
@@ -148,7 +148,7 @@ impl Match {
             index: index as u32,
             exact: false,
             #[cfg(feature = "match_end_col")]
-            match_end_col: 0,
+            end_col: 0,
         }
     }
 }
