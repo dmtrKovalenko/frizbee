@@ -393,6 +393,8 @@ mod tests {
         assert_eq!(get_end_col("c", "abc"), 2);
         // "def" in "abcdef" should end at column 5
         assert_eq!(get_end_col("def", "abcdef"), 5);
+        // "def" in "abcdef" should end at column 21
+        assert_eq!(get_end_col("def", "________________abcdef"), 21);
     }
 
     #[test]
