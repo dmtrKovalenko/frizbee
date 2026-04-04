@@ -47,6 +47,8 @@ impl Matcher {
                     index: index as u32,
                     score: 0,
                     exact: false,
+                    #[cfg(feature = "match_end_col")]
+                    end_col: 0,
                 })
                 .collect();
         }
@@ -266,6 +268,8 @@ impl Matcher {
             index,
             score,
             exact,
+            #[cfg(feature = "match_end_col")]
+            end_col: self.smith_waterman.match_end_col(haystack),
         })
     }
 
@@ -452,5 +456,23 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
         assert!(matches[0].exact);
+    }
+
+    #[test]
+    #[cfg(feature = "match_end_col")]
+    fn test_match_end_col_through_match_list() {
+        let config = Config {
+            max_typos: None,
+            sort: false,
+            ..Config::default()
+        };
+        let matches = match_list("abc", &["xabcx", "abcdef", "xxabc"], &config);
+        assert_eq!(matches.len(), 3);
+        // "abc" in "xabcx" ends at byte position 3
+        assert_eq!(matches[0].end_col, 3);
+        // "abc" in "abcdef" ends at byte position 2
+        assert_eq!(matches[1].end_col, 2);
+        // "abc" in "xxabc" ends at byte position 4
+        assert_eq!(matches[2].end_col, 4);
     }
 }

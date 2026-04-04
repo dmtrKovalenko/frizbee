@@ -252,6 +252,27 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
     }
 
+    pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
+        if haystack.len() > MAX_HAYSTACK_LEN {
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .and_then(|(_, indices)| indices.last().copied())
+                .unwrap_or(0) as u16;
+        }
+
+        let mut match_end_col: u16 = 0;
+        let mut max_score = 0;
+        for col_idx in 1..(haystack.len().div_ceil(16) + 1) {
+            let chunk_scores = self.score_matrix.get(self.needle.len(), col_idx);
+            let chunk_max_score = unsafe { chunk_scores.smax_u16() };
+            if chunk_max_score > max_score {
+                max_score = chunk_max_score;
+                let lane = unsafe { chunk_scores.idx_u16(chunk_max_score) };
+                match_end_col = ((col_idx - 1) * 16 + lane) as u16;
+            }
+        }
+        match_end_col
+    }
+
     #[cfg(test)]
     pub fn print_score_matrix(&self, haystack: &str) {
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
