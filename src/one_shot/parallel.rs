@@ -9,6 +9,14 @@ use crate::{Config, Match, Matchable, MatchableChunked};
 macro_rules! worker_resolved_inner {
     ($matcher:expr, $items:expr, $resolve:expr, $next_chunk:expr, $num_chunks:expr, $chunk_size:expr, $sort:expr) => {{
         let mut local_matches = Vec::new();
+        let needle = $matcher.needle.as_bytes();
+        let min_haystack_len = $matcher
+            .config
+            .max_typos
+            .map(|max| needle.len().saturating_sub(max as usize))
+            .unwrap_or(0);
+        let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+
         loop {
             let chunk_idx = $next_chunk.fetch_add(1, Ordering::Relaxed);
             if chunk_idx >= $num_chunks {
@@ -17,7 +25,27 @@ macro_rules! worker_resolved_inner {
             let start = chunk_idx * $chunk_size;
             let end = (start + $chunk_size).min($items.len());
             let items_chunk = &$items[start..end];
-            $matcher.match_list_resolved_into(items_chunk, start as u32, $resolve, &mut local_matches);
+
+            for (index, item) in items_chunk.iter().enumerate() {
+                let Some((chunk_count, byte_len)) = ($resolve)(item, &mut ptrs_buf) else {
+                    continue;
+                };
+
+                let total_len = byte_len as usize;
+                if total_len < min_haystack_len {
+                    continue;
+                }
+
+                let chunk_ptrs = &ptrs_buf[..chunk_count];
+
+                if let Some(match_) = $matcher.match_one_chunked(
+                    chunk_ptrs,
+                    byte_len,
+                    (index as u32) + start as u32,
+                ) {
+                    local_matches.push(match_);
+                }
+            }
         }
         if $sort {
             radix_sort_matches(&mut local_matches);
