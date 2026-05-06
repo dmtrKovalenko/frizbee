@@ -98,7 +98,7 @@ impl Prefilter {
     /// The haystack can then be sliced to skip empty chunks: `haystack[skipped_chunks * 16..]`
     ///
     /// The caller must ensure needle.len() > 0
-    #[inline]
+    #[inline(always)]
     pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
         match (self, max_typos) {
             #[cfg(target_arch = "x86_64")]
@@ -118,7 +118,7 @@ impl Prefilter {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn match_haystack_chunked(
         &self,
         chunk_ptrs: &[*const u8],

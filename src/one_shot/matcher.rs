@@ -499,8 +499,9 @@ impl Matcher {
             .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
 
+        let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+
         for (index, item) in items.iter().enumerate() {
-            let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
             let Some((chunk_count, byte_len)) = resolve(item, &mut ptrs_buf) else {
                 continue;
             };
@@ -512,18 +513,7 @@ impl Matcher {
 
             let chunk_ptrs = &ptrs_buf[..chunk_count];
 
-            let (prefilter_passed, skipped_chunks) =
-                self.config.max_typos.map_or((true, 0), |max_typos| {
-                    self.prefilter
-                        .match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
-                });
-            if !prefilter_passed {
-                continue;
-            }
-
-            let chunk_ptrs = &chunk_ptrs[skipped_chunks..];
-            let byte_len = byte_len - (skipped_chunks as u16 * 16);
-            if let Some(match_) = self.smith_waterman_one_chunked(
+            if let Some(match_) = self.match_one_chunked(
                 chunk_ptrs,
                 byte_len,
                 (index as u32) + item_index_offset,
@@ -531,6 +521,30 @@ impl Matcher {
                 matches.push(match_);
             }
         }
+    }
+
+    /// The core per-item matching: prefilter + smith_waterman.
+    /// This is non-generic so it can be properly inlined when called from
+    /// within a `#[target_feature]` context (via the define_matcher wrappers).
+    #[inline(always)]
+    pub fn match_one_chunked(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        index: u32,
+    ) -> Option<Match> {
+        let (prefilter_passed, skipped_chunks) =
+            self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter
+                    .match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+            });
+        if !prefilter_passed {
+            return None;
+        }
+
+        let chunk_ptrs = &chunk_ptrs[skipped_chunks..];
+        let byte_len = byte_len - (skipped_chunks as u16 * 16);
+        self.smith_waterman_one_chunked(chunk_ptrs, byte_len, index)
     }
 
     #[inline(always)]

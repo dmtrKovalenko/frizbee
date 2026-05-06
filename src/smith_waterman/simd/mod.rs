@@ -45,6 +45,7 @@ impl SmithWatermanMatcher {
         Self::Scalar(SmithWatermanMatcherScalar::new(needle, scoring))
     }
 
+    #[inline(always)]
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -105,6 +106,7 @@ impl SmithWatermanMatcher {
         }
     }
 
+    #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -117,6 +119,7 @@ impl SmithWatermanMatcher {
         }
     }
 
+    #[inline(always)]
     pub fn score_haystack_chunked(&mut self, chunk_ptrs: &[*const u8], byte_len: u16) -> u16 {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -129,6 +132,7 @@ impl SmithWatermanMatcher {
         }
     }
 
+    #[inline(always)]
     pub fn match_haystack_chunked(
         &mut self,
         chunk_ptrs: &[*const u8],
@@ -155,6 +159,7 @@ impl SmithWatermanMatcher {
     }
 
     #[cfg(feature = "match_end_col")]
+    #[inline(always)]
     pub fn match_haystack_chunked_with_end_col(
         &mut self,
         chunk_ptrs: &[*const u8],
