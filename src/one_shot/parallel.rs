@@ -6,6 +6,66 @@ use super::Matcher;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, Matchable, MatchableChunked};
 
+macro_rules! worker_resolved_inner {
+    ($matcher:expr, $items:expr, $resolve:expr, $next_chunk:expr, $num_chunks:expr, $chunk_size:expr, $sort:expr) => {{
+        let mut local_matches = Vec::new();
+        loop {
+            let chunk_idx = $next_chunk.fetch_add(1, Ordering::Relaxed);
+            if chunk_idx >= $num_chunks {
+                break;
+            }
+            let start = chunk_idx * $chunk_size;
+            let end = (start + $chunk_size).min($items.len());
+            let items_chunk = &$items[start..end];
+            $matcher.match_list_resolved_into(items_chunk, start as u32, $resolve, &mut local_matches);
+        }
+        if $sort {
+            radix_sort_matches(&mut local_matches);
+        }
+        local_matches
+    }};
+}
+
+/// Per-thread worker body for resolved matching — AVX2 variant.
+/// By placing the hot loop inside a `#[target_feature]` function, the compiler
+/// can inline `match_list_resolved_into` → prefilter → smith_waterman into one
+/// continuous instruction stream without call boundaries or vzeroupper transitions.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn worker_resolved_avx2<T, F>(
+    matcher: &mut Matcher,
+    items: &[T],
+    resolve: &F,
+    next_chunk: &AtomicUsize,
+    num_chunks: usize,
+    chunk_size: usize,
+    sort: bool,
+) -> Vec<Match>
+where
+    F: Fn(&T, &mut [*const u8; 32]) -> Option<(usize, u16)>,
+{
+    worker_resolved_inner!(matcher, items, resolve, next_chunk, num_chunks, chunk_size, sort)
+}
+
+/// Per-thread worker body for resolved matching — SSE4.1 variant.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3", enable = "sse4.1")]
+unsafe fn worker_resolved_sse<T, F>(
+    matcher: &mut Matcher,
+    items: &[T],
+    resolve: &F,
+    next_chunk: &AtomicUsize,
+    num_chunks: usize,
+    chunk_size: usize,
+    sort: bool,
+) -> Vec<Match>
+where
+    F: Fn(&T, &mut [*const u8; 32]) -> Option<(usize, u16)>,
+{
+    worker_resolved_inner!(matcher, items, resolve, next_chunk, num_chunks, chunk_size, sort)
+}
+
+
 pub fn match_list_parallel<S1: AsRef<str>, S2: Matchable + Sync>(
     needle: S1,
     haystacks: &[S2],
@@ -139,32 +199,47 @@ pub fn match_list_parallel_resolved<
         let handles: Vec<_> = (0..threads)
             .map(|_| {
                 s.spawn(|| {
-                    let mut local_matches = Vec::new();
                     let mut matcher = matcher.clone();
 
-                    loop {
-                        let chunk_idx = next_chunk.fetch_add(1, Ordering::Relaxed);
-                        if chunk_idx >= num_chunks {
-                            break;
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        if std::arch::is_x86_feature_detected!("avx2") {
+                            return unsafe {
+                                worker_resolved_avx2(
+                                    &mut matcher,
+                                    items,
+                                    resolve,
+                                    &next_chunk,
+                                    num_chunks,
+                                    chunk_size,
+                                    config.sort,
+                                )
+                            };
                         }
-
-                        let start = chunk_idx * chunk_size;
-                        let end = (start + chunk_size).min(items.len());
-                        let items_chunk = &items[start..end];
-
-                        matcher.match_list_resolved_into(
-                            items_chunk,
-                            start as u32,
-                            resolve,
-                            &mut local_matches,
-                        );
+                        if std::arch::is_x86_feature_detected!("sse4.1") {
+                            return unsafe {
+                                worker_resolved_sse(
+                                    &mut matcher,
+                                    items,
+                                    resolve,
+                                    &next_chunk,
+                                    num_chunks,
+                                    chunk_size,
+                                    config.sort,
+                                )
+                            };
+                        }
                     }
 
-                    if config.sort {
-                        radix_sort_matches(&mut local_matches);
-                    }
-
-                    local_matches
+                    worker_resolved_inner!(
+                        matcher,
+                        items,
+                        resolve,
+                        next_chunk,
+                        num_chunks,
+                        chunk_size,
+                        config.sort
+                    )
                 })
             })
             .collect();
