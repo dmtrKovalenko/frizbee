@@ -30,14 +30,14 @@ mod scalar;
 mod sse;
 
 #[cfg(target_arch = "x86_64")]
-pub use avx::{AvxBackend, AvxU8Backend};
+pub use avx::{BackendAVX, BackendAVXU8};
 #[cfg(target_arch = "x86_64")]
-pub use avx512::{Avx512Backend, Avx512U8Backend};
+pub use avx512::{BackendAVX512, BackendAVX512U8};
 #[cfg(target_arch = "aarch64")]
-pub use neon::{NeonBackend, NeonU8Backend};
-pub use scalar::{Scalar8Backend, Scalar16U8Backend};
+pub use neon::{BackendNEON, BackendNEONU8};
+pub use scalar::{BackendScalar8, BackendScalar16U8};
 #[cfg(target_arch = "x86_64")]
-pub use sse::{SseBackend, SseU8Backend};
+pub use sse::{BackendSSE, BackendSSEU8};
 
 /// A SIMD backend for Smith-Waterman matching that supports variable-width
 /// lanes (8, 16, 32, 64) and score primitives (u8, u16).
@@ -807,24 +807,24 @@ mod tests {
         };
     }
 
-    backend_tests!(scalar8, super::Scalar8Backend);
-    backend_tests!(scalar16_u8, super::Scalar16U8Backend);
+    backend_tests!(scalar8, super::BackendScalar8);
+    backend_tests!(scalar16_u8, super::BackendScalar16U8);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(sse, super::SseBackend);
+    backend_tests!(sse, super::BackendSSE);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(sse_u8, super::SseU8Backend);
+    backend_tests!(sse_u8, super::BackendSSEU8);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(avx, super::AvxBackend);
+    backend_tests!(avx, super::BackendAVX);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(avx_u8, super::AvxU8Backend);
+    backend_tests!(avx_u8, super::BackendAVXU8);
     #[cfg(target_arch = "x86_64")]
-    backend_tests_32_lane!(avx_u8_extra, super::AvxU8Backend);
+    backend_tests_32_lane!(avx_u8_extra, super::BackendAVXU8);
     #[cfg(target_arch = "x86_64")]
-    backend_tests_runtime_gated!(avx512, super::Avx512Backend);
+    backend_tests_runtime_gated!(avx512, super::BackendAVX512);
     #[cfg(target_arch = "x86_64")]
-    backend_tests_runtime_gated!(avx512_u8, super::Avx512U8Backend);
+    backend_tests_runtime_gated!(avx512_u8, super::BackendAVX512U8);
     #[cfg(target_arch = "aarch64")]
-    backend_tests!(neon, super::NeonBackend);
+    backend_tests!(neon, super::BackendNEON);
     #[cfg(target_arch = "aarch64")]
-    backend_tests!(neon_u8, super::NeonU8Backend);
+    backend_tests!(neon_u8, super::BackendNEONU8);
 }

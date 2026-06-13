@@ -4,7 +4,7 @@ use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 16-lane u16 scoring (256-bit __m256i), 16-lane u8 input (128-bit __m128i).
 #[derive(Debug, Clone, Copy)]
-pub struct AvxBackend;
+pub struct BackendAVX;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AvxBytes(__m128i);
@@ -12,7 +12,7 @@ pub struct AvxBytes(__m128i);
 #[derive(Debug, Clone, Copy)]
 pub struct AvxScore(__m256i);
 
-impl Backend for AvxBackend {
+impl Backend for BackendAVX {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 2;
     type Bytes = AvxBytes;
@@ -40,7 +40,7 @@ impl Backend for AvxBackend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<AvxBackend>(
+            super::propagate_16_lane::<BackendAVX>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -315,7 +315,7 @@ impl ScoreVec for AvxScore {
 
 /// 32-lane u8 scoring (256-bit __m256i), 32-lane u8 input (256-bit __m256i).
 #[derive(Debug, Clone, Copy)]
-pub struct AvxU8Backend;
+pub struct BackendAVXU8;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AvxU8Bytes(__m256i);
@@ -323,7 +323,7 @@ pub struct AvxU8Bytes(__m256i);
 #[derive(Debug, Clone, Copy)]
 pub struct AvxU8Score(__m256i);
 
-impl Backend for AvxU8Backend {
+impl Backend for BackendAVXU8 {
     const LANES: usize = 32;
     const LANE_BYTES: usize = 1;
     type Bytes = AvxU8Bytes;
@@ -331,7 +331,7 @@ impl Backend for AvxU8Backend {
     type Score = AvxU8Score;
 
     fn is_available() -> bool {
-        AvxBackend::is_available()
+        BackendAVX::is_available()
     }
 
     #[inline(always)]
@@ -349,7 +349,7 @@ impl Backend for AvxU8Backend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_32_lane::<AvxU8Backend>(
+            super::propagate_32_lane::<BackendAVXU8>(
                 row,
                 adjacent_row,
                 match_mask,

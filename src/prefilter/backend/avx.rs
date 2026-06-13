@@ -17,17 +17,9 @@ pub struct PrefilterAVX {
     needle_simd: Vec<(__m256i, __m256i)>,
 }
 
-impl PrefilterAVX {
-    pub fn is_available() -> bool {
-        Prefilter::<PrefilterAVXBackend>::is_available()
-    }
-}
-
 impl Kernel for PrefilterAVX {
     #[inline(always)]
     fn new(needle: &[u8]) -> Self {
-        assert!(!needle.is_empty(), "needle must not be empty");
-
         let needle_cases = case_needle(needle);
         let needle_len = needle_cases.len();
         let mut needle_simd = needle_cases
@@ -46,6 +38,11 @@ impl Kernel for PrefilterAVX {
             needle_len,
             needle_simd,
         }
+    }
+
+    #[inline(always)]
+    fn is_available() -> bool {
+        PrefilterAVXBackend::is_available()
     }
 
     #[inline(always)]
@@ -167,13 +164,8 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
-    fn match_haystack_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        match max_typos {
-            0 => self.match_haystack(haystack),
-            1 => self.match_haystack_1_typo(haystack),
-            2 => self.match_haystack_2_typos(haystack),
-            _ => unsafe { self.inner.match_haystack_many_typos(haystack, max_typos) },
-        }
+    fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
+        unsafe { self.inner.match_haystack_many_typos(haystack, max_typos) }
     }
 }
 

@@ -31,11 +31,6 @@ impl<B: Backend> Prefilter<B> {
     }
 
     #[inline(always)]
-    pub fn is_available() -> bool {
-        B::is_available()
-    }
-
-    #[inline(always)]
     unsafe fn needle_unchecked(&self, idx: usize) -> B::Needle {
         unsafe { *self.needle.get_unchecked(idx) }
     }

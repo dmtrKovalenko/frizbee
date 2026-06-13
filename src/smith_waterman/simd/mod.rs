@@ -1,5 +1,10 @@
 use crate::Scoring;
 use backend::Backend;
+#[cfg(target_arch = "x86_64")]
+use backend::{BackendAVX, BackendAVX512, BackendAVX512U8, BackendAVXU8, BackendSSE, BackendSSEU8};
+#[cfg(target_arch = "aarch64")]
+use backend::{BackendNEON, BackendNEONU8};
+use backend::{BackendScalar8, BackendScalar16U8};
 use matrix::Matrix;
 
 mod algo;
@@ -9,6 +14,25 @@ pub(crate) mod backend;
 mod matrix;
 
 pub use alignment_iter::{Alignment, AlignmentPathIter};
+
+#[cfg(target_arch = "x86_64")]
+pub type SmithWatermanAVX512U8 = SmithWaterman<BackendAVX512U8>;
+#[cfg(target_arch = "x86_64")]
+pub type SmithWatermanAVX512 = SmithWaterman<BackendAVX512>;
+#[cfg(target_arch = "x86_64")]
+pub type SmithWatermanSSE = SmithWaterman<BackendSSE>;
+#[cfg(target_arch = "x86_64")]
+pub type SmithWatermanSSEU8 = SmithWaterman<BackendSSEU8>;
+#[cfg(target_arch = "x86_64")]
+pub type SmithWatermanAVX = SmithWaterman<BackendAVX>;
+#[cfg(target_arch = "x86_64")]
+pub type SmithWatermanAVXU8 = SmithWaterman<BackendAVXU8>;
+#[cfg(target_arch = "aarch64")]
+pub type SmithWatermanNEON = SmithWaterman<BackendNEON>;
+#[cfg(target_arch = "aarch64")]
+pub type SmithWatermanNEONU8 = SmithWaterman<BackendNEONU8>;
+pub type SmithWatermanScalar = SmithWaterman<BackendScalar8>;
+pub type SmithWatermanScalarU8 = SmithWaterman<BackendScalar16U8>;
 
 /// Returns true if every possible Smith-Waterman matrix cell value for this
 /// needle length and scoring config fits in a u8. The u8 backends are
@@ -39,39 +63,55 @@ pub(crate) struct SmithWaterman<B: Backend> {
     haystack_chunks: usize,
 }
 
+pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
+    fn new(needle: &[u8], scoring: &Scoring) -> Self;
+    fn is_available() -> bool;
+    #[cfg(test)]
+    fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16>;
+    fn match_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        skipped_chars: usize,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, Vec<usize>)>;
+    fn score_haystack(&mut self, haystack: &[u8]) -> u16;
+    #[cfg(feature = "match_end_col")]
+    fn match_end_col(&self, haystack: &[u8]) -> u16;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::r#const::*;
+    use crate::smith_waterman::simd::backend::{Backend, BackendScalar8, BackendScalar16U8};
     #[cfg(target_arch = "x86_64")]
     use crate::smith_waterman::simd::backend::{
-        Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend,
+        BackendAVX, BackendAVX512, BackendAVX512U8, BackendAVXU8, BackendSSE, BackendSSEU8,
     };
-    use crate::smith_waterman::simd::backend::{Backend, Scalar8Backend, Scalar16U8Backend};
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher =
-            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
         let score = matcher.match_haystack(haystack.as_bytes(), Some(0));
         score.unwrap()
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
         let mut matcher =
-            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
-        let score = matcher.match_haystack(haystack.as_bytes(), Some(max_typos));
-        score
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
+
+        matcher.match_haystack(haystack.as_bytes(), Some(max_typos))
     }
 
     fn get_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
         let mut matcher =
-            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
-        let indices = matcher
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
+
+        matcher
             .match_haystack_indices(haystack.as_bytes(), 0, None)
-            .map(|(_, indices)| indices);
-        indices
+            .map(|(_, indices)| indices)
     }
 
     #[test]
@@ -163,7 +203,7 @@ mod tests {
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher =
-            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
         matcher.match_haystack(haystack.as_bytes(), None);
         matcher.match_end_col(haystack.as_bytes())
     }
@@ -288,25 +328,25 @@ mod tests {
     #[test]
     fn cross_backend_parity_score() {
         for (needle, haystack) in cases() {
-            let want = score_with::<Scalar8Backend>(needle, haystack);
+            let want = score_with::<BackendScalar8>(needle, haystack);
 
             #[cfg(target_arch = "x86_64")]
             {
-                assert_score_backend::<SseBackend>("SSE-u16", needle, haystack, want);
-                assert_score_backend::<Avx512Backend>("AVX-512-u16", needle, haystack, want);
-                assert_score_backend::<AvxBackend>("AVX-u16", needle, haystack, want);
+                assert_score_backend::<BackendSSE>("SSE-u16", needle, haystack, want);
+                assert_score_backend::<BackendAVX512>("AVX-512-u16", needle, haystack, want);
+                assert_score_backend::<BackendAVX>("AVX-u16", needle, haystack, want);
 
                 if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                    assert_score_backend::<SseU8Backend>("SSE-u8", needle, haystack, want);
-                    assert_score_backend::<AvxU8Backend>("AVX-u8", needle, haystack, want);
-                    assert_score_backend::<Avx512U8Backend>("AVX-512-u8", needle, haystack, want);
+                    assert_score_backend::<BackendSSEU8>("SSE-u8", needle, haystack, want);
+                    assert_score_backend::<BackendAVXU8>("AVX-u8", needle, haystack, want);
+                    assert_score_backend::<BackendAVX512U8>("AVX-512-u8", needle, haystack, want);
                 }
             }
 
-            assert_score_backend::<Scalar8Backend>("Scalar-u16", needle, haystack, want);
+            assert_score_backend::<BackendScalar8>("Scalar-u16", needle, haystack, want);
 
             if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                assert_score_backend::<Scalar16U8Backend>("Scalar-u8", needle, haystack, want);
+                assert_score_backend::<BackendScalar16U8>("Scalar-u8", needle, haystack, want);
             }
         }
     }
@@ -314,33 +354,33 @@ mod tests {
     #[test]
     fn cross_backend_parity_indices() {
         for (needle, haystack) in cases() {
-            let want = indices_with::<Scalar8Backend>(needle, haystack);
+            let want = indices_with::<BackendScalar8>(needle, haystack);
 
             #[cfg(target_arch = "x86_64")]
             {
-                assert_indices_backend::<SseBackend>("SSE-u16", needle, haystack, want.clone());
-                assert_indices_backend::<Avx512Backend>(
+                assert_indices_backend::<BackendSSE>("SSE-u16", needle, haystack, want.clone());
+                assert_indices_backend::<BackendAVX512>(
                     "AVX-512-u16",
                     needle,
                     haystack,
                     want.clone(),
                 );
-                assert_indices_backend::<AvxBackend>("AVX-u16", needle, haystack, want.clone());
+                assert_indices_backend::<BackendAVX>("AVX-u16", needle, haystack, want.clone());
 
                 if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                    assert_indices_backend::<SseU8Backend>(
+                    assert_indices_backend::<BackendSSEU8>(
                         "SSE-u8",
                         needle,
                         haystack,
                         want.clone(),
                     );
-                    assert_indices_backend::<AvxU8Backend>(
+                    assert_indices_backend::<BackendAVXU8>(
                         "AVX-u8",
                         needle,
                         haystack,
                         want.clone(),
                     );
-                    assert_indices_backend::<Avx512U8Backend>(
+                    assert_indices_backend::<BackendAVX512U8>(
                         "AVX-512-u8",
                         needle,
                         haystack,
@@ -349,10 +389,10 @@ mod tests {
                 }
             }
 
-            assert_indices_backend::<Scalar8Backend>("Scalar-u16", needle, haystack, want.clone());
+            assert_indices_backend::<BackendScalar8>("Scalar-u16", needle, haystack, want.clone());
 
             if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                assert_indices_backend::<Scalar16U8Backend>("Scalar-u8", needle, haystack, want);
+                assert_indices_backend::<BackendScalar16U8>("Scalar-u8", needle, haystack, want);
             }
         }
     }

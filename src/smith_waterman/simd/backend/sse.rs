@@ -4,7 +4,7 @@ use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 8-lane u16 scoring (128-bit __mm128i), 8-lane u8 input (low half of __m128i).
 #[derive(Debug, Clone, Copy)]
-pub struct SseBackend;
+pub struct BackendSSE;
 
 /// Physically occupies a full 128-bit register, but only the low 8 bytes are
 /// used since we'll eventually widen the 8-bit per lane to 16-bit per lane
@@ -15,7 +15,7 @@ pub struct SseBytes(__m128i);
 #[derive(Debug, Clone, Copy)]
 pub struct SseScore(__m128i);
 
-impl Backend for SseBackend {
+impl Backend for BackendSSE {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
     type Bytes = SseBytes;
@@ -45,7 +45,7 @@ impl Backend for SseBackend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_8_lane::<SseBackend>(
+            super::propagate_8_lane::<BackendSSE>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -302,7 +302,7 @@ impl ScoreVec for SseScore {
 
 /// 16-lane u8 scoring (128-bit __m128i), 16-lane u8 input (128-bit __m128i)
 #[derive(Debug, Clone, Copy)]
-pub struct SseU8Backend;
+pub struct BackendSSEU8;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SseU8Bytes(__m128i);
@@ -310,7 +310,7 @@ pub struct SseU8Bytes(__m128i);
 #[derive(Debug, Clone, Copy)]
 pub struct SseU8Score(__m128i);
 
-impl Backend for SseU8Backend {
+impl Backend for BackendSSEU8 {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
     type Bytes = SseU8Bytes;
@@ -318,7 +318,7 @@ impl Backend for SseU8Backend {
     type Score = SseU8Score;
 
     fn is_available() -> bool {
-        SseBackend::is_available()
+        BackendSSE::is_available()
     }
 
     #[inline(always)]
@@ -336,7 +336,7 @@ impl Backend for SseU8Backend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<SseU8Backend>(
+            super::propagate_16_lane::<BackendSSEU8>(
                 row,
                 adjacent_row,
                 match_mask,

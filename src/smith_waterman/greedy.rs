@@ -4,7 +4,7 @@
 
 use crate::Scoring;
 
-const DELIMITERS: [u8; 7] = [b' ', b'/', b'.', b',', b'_', b'-', b':'];
+const DELIMITERS: [u8; 7] = *b" /.,_-:";
 
 /// Fallback fuzzy matching algorithm for large haystacks. Finds the first possible match rather than
 /// the optimal alignment.

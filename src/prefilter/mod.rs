@@ -9,7 +9,8 @@
 //! cannot reject a haystack that Smith-Waterman could accept.
 //!
 //! Matcher chooses the concrete prefilter backend via runtime feature detection.
-//! All algorithms assume that needle.len() > 0
+//! Matching assumes that needle.len() > 0, but backends may be constructed for
+//! empty needles so `Matcher` can still select a concrete backend up front.
 
 pub(crate) mod algo;
 pub(crate) mod backend;
@@ -38,17 +39,23 @@ pub(crate) type Window = (bool, usize, usize);
 /// Ordered prefiltering kernel which allows score-level false positives.
 pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
     fn new(needle: &[u8]) -> Self;
+    fn is_available() -> bool;
 
     fn match_haystack(&self, haystack: &[u8]) -> Window;
     fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window;
     fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
+    fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
 }
 
 impl<B: Backend> Kernel for Prefilter<B> {
     #[inline(always)]
     fn new(needle: &[u8]) -> Self {
         unsafe { Self::new(needle) }
+    }
+
+    #[inline(always)]
+    fn is_available() -> bool {
+        B::is_available()
     }
 
     #[inline(always)]
@@ -67,13 +74,8 @@ impl<B: Backend> Kernel for Prefilter<B> {
     }
 
     #[inline(always)]
-    fn match_haystack_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        match max_typos {
-            0 => Kernel::match_haystack(self, haystack),
-            1 => Kernel::match_haystack_1_typo(self, haystack),
-            2 => Kernel::match_haystack_2_typos(self, haystack),
-            _ => unsafe { self.match_haystack_many_typos(haystack, max_typos) },
-        }
+    fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
+        unsafe { self.match_haystack_many_typos(haystack, max_typos) }
     }
 }
 
@@ -215,7 +217,12 @@ mod tests {
 
     fn kernel_result<P: Kernel>(needle: &[u8], haystack: &[u8], max_typos: u16) -> Window {
         let mut prefilter = P::new(needle);
-        prefilter.match_haystack_typos(haystack, max_typos)
+        match max_typos {
+            0 => prefilter.match_haystack(haystack),
+            1 => prefilter.match_haystack_1_typo(haystack),
+            2 => prefilter.match_haystack_2_typos(haystack),
+            _ => prefilter.match_haystack_many_typos(haystack, max_typos),
+        }
     }
 
     fn assert_same_result(got: (bool, usize, usize), want: (bool, usize, usize), context: &str) {

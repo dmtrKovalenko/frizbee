@@ -4,7 +4,7 @@ use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 8-lane scoring (uint16x8_t, 128-bit), 8-byte bytes (uint8x8_t, 64-bit).
 #[derive(Debug, Clone, Copy)]
-pub struct NeonBackend;
+pub struct BackendNEON;
 
 #[derive(Debug, Clone, Copy)]
 pub struct NeonBytes(uint8x8_t);
@@ -12,7 +12,7 @@ pub struct NeonBytes(uint8x8_t);
 #[derive(Debug, Clone, Copy)]
 pub struct NeonScore(uint16x8_t);
 
-impl Backend for NeonBackend {
+impl Backend for BackendNEON {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
     type Bytes = NeonBytes;
@@ -38,7 +38,7 @@ impl Backend for NeonBackend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_8_lane::<NeonBackend>(
+            super::propagate_8_lane::<BackendNEON>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -287,7 +287,7 @@ impl ScoreVec for NeonScore {
 
 /// 16-lane scoring (uint8x16_t), 16-lane u8 input (uint8x16_t)
 #[derive(Debug, Clone, Copy)]
-pub struct NeonU8Backend;
+pub struct BackendNEONU8;
 
 #[derive(Debug, Clone, Copy)]
 pub struct NeonU8Bytes(uint8x16_t);
@@ -295,7 +295,7 @@ pub struct NeonU8Bytes(uint8x16_t);
 #[derive(Debug, Clone, Copy)]
 pub struct NeonU8Score(uint8x16_t);
 
-impl Backend for NeonU8Backend {
+impl Backend for BackendNEONU8 {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
     type Bytes = NeonU8Bytes;
@@ -321,7 +321,7 @@ impl Backend for NeonU8Backend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<NeonU8Backend>(
+            super::propagate_16_lane::<BackendNEONU8>(
                 row,
                 adjacent_row,
                 match_mask,

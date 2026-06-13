@@ -14,9 +14,9 @@ pub struct Scalar8Bytes([u8; 8]);
 pub struct Scalar8Score([u16; 8]);
 
 #[derive(Debug, Clone, Copy)]
-pub struct Scalar8Backend;
+pub struct BackendScalar8;
 
-impl Backend for Scalar8Backend {
+impl Backend for BackendScalar8 {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
     type Bytes = Scalar8Bytes;
@@ -46,7 +46,7 @@ impl Backend for Scalar8Backend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_8_lane::<Scalar8Backend>(
+            super::propagate_8_lane::<BackendScalar8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -267,9 +267,9 @@ pub struct Scalar16U8Bytes([u8; 16]);
 pub struct Scalar16U8Score([u8; 16]);
 
 #[derive(Debug, Clone, Copy)]
-pub struct Scalar16U8Backend;
+pub struct BackendScalar16U8;
 
-impl Backend for Scalar16U8Backend {
+impl Backend for BackendScalar16U8 {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
     type Bytes = Scalar16U8Bytes;
@@ -295,7 +295,7 @@ impl Backend for Scalar16U8Backend {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<Scalar16U8Backend>(
+            super::propagate_16_lane::<BackendScalar16U8>(
                 row,
                 adjacent_row,
                 match_mask,

@@ -1,3 +1,4 @@
+use crate::smith_waterman::simd::Kernel;
 use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy};
 
 use super::SmithWaterman;
@@ -7,11 +8,15 @@ use super::matrix::Matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
 
-impl<B: Backend> SmithWaterman<B> {
-    pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
+impl<B: Backend> Kernel for SmithWaterman<B> {
+    fn new(needle: &[u8], scoring: &Scoring) -> Self {
+        let needle_simd = case_needle(needle)
+            .iter()
+            .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
+            .collect();
         Self {
             needle: String::from_utf8_lossy(needle).to_string(),
-            needle_simd: Self::broadcast_needle(needle),
+            needle_simd,
             scoring: scoring.clone(),
             score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
@@ -19,17 +24,13 @@ impl<B: Backend> SmithWaterman<B> {
         }
     }
 
-    fn broadcast_needle(needle: &[u8]) -> Vec<(B::Bytes, B::Bytes)> {
-        let needle_cased = case_needle(needle);
-        needle_cased
-            .iter()
-            .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
-            .collect()
+    fn is_available() -> bool {
+        B::is_available()
     }
 
     #[cfg(test)]
     #[inline(always)]
-    pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
+    fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
                 .map(|(score, _)| score);
@@ -43,7 +44,7 @@ impl<B: Backend> SmithWaterman<B> {
     }
 
     #[inline(always)]
-    pub fn match_haystack_indices(
+    fn match_haystack_indices(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
@@ -74,7 +75,7 @@ impl<B: Backend> SmithWaterman<B> {
     }
 
     #[inline(always)]
-    pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+    fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
                 .map(|(score, _)| score)
@@ -212,7 +213,7 @@ impl<B: Backend> SmithWaterman<B> {
     }
 
     #[cfg(feature = "match_end_col")]
-    pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
+    fn match_end_col(&self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
                 .and_then(|(_, indices)| indices.last().copied())
