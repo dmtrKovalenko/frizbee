@@ -59,7 +59,7 @@ haystack_size: 1406941
 
 |          | `Nucleo`                 | `Frizbee`                       | `Parallel (x8)`                 | `All Scores`                    | `1 Typo`                        | `2 Typos`                       | `3 Typos`                         |
 |:---------|:-------------------------|:--------------------------------|:--------------------------------|:--------------------------------|:--------------------------------|:--------------------------------|:--------------------------------- |
-| **`67`** | `88.99 ms` (**1.00x**) | `22.26 ms` (**4.00x faster**) | `3.67 ms` (**24.25x faster**) | `88.52 ms` (**1.01x faster**) | `56.55 ms` (**1.57x faster**) | `92.16 ms` (**1.04x slower**) | `142.75 ms` (*1.60x slower*)    |
+| **`67`** | `88.99 ms` (**1.00x**) | `22.26 ms` (**4.00x faster**) | `3.58 ms` (**24.86x faster**) | `88.52 ms` (**1.01x faster**) | `56.55 ms` (**1.57x faster**) | `92.16 ms` (**1.04x slower**) | `142.75 ms` (*1.60x slower*)    |
 
 #### FZF
 
@@ -67,7 +67,7 @@ Version: 0.73.1
 
 Single threaded: `119.01ms` (*5.3x slower*)
 
-Multi threaded (8 threads): `15.95ms` (*4.3x slower* vs parallel)
+Multi threaded (8 threads): `15.95ms` (*4.5x slower* vs parallel)
 
 `fzf --filter linux --tiebreak index --bench 10s --threads 1 < benches/match_list/data.txt`
 

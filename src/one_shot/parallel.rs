@@ -35,7 +35,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
 
     // Smaller chunks enable better load balancing via stealing
     // but too small increases atomic contention
-    let chunk_size = 512;
+    let chunk_size = 2048;
     let num_chunks = haystacks.len().div_ceil(chunk_size);
     let next_chunk = AtomicUsize::new(0);
 
