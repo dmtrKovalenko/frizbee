@@ -13,11 +13,10 @@ impl Backend for PrefilterAVX512Backend {
     type Mask = u64;
 
     fn is_available() -> bool {
-        raw_cpuid::CpuId::new()
-            .get_extended_feature_info()
-            .is_some_and(|info| {
-                info.has_avx512f() && info.has_avx512bw() && info.has_bmi1() && info.has_bmi2()
-            })
+        is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("bmi1")
+            && is_x86_feature_detected!("bmi2")
     }
 
     #[inline(always)]

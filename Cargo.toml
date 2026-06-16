@@ -29,9 +29,6 @@ bench = false
 [dependencies]
 serde = { version = "1.0", features = ["derive"], optional = true }
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-raw-cpuid = "11.6" # runtime feature detection
-
 [features]
 serde = ["dep:serde"]
 match_end_col = []

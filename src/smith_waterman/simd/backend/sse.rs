@@ -23,11 +23,7 @@ impl Backend for BackendSSE {
     type Score = SseScore;
 
     fn is_available() -> bool {
-        // SSE 4.1 covers _mm_minpos_epu16, _mm_cvtepi8_epi16, _mm_max_epu16,
-        // _mm_alignr_epi8.
-        raw_cpuid::CpuId::new()
-            .get_feature_info()
-            .is_some_and(|info| info.has_sse41())
+        is_x86_feature_detected!("sse4.1")
     }
 
     #[inline(always)]

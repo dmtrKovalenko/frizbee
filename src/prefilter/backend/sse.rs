@@ -13,9 +13,7 @@ impl Backend for PrefilterSSEBackend {
     type Mask = u16;
 
     fn is_available() -> bool {
-        raw_cpuid::CpuId::new()
-            .get_feature_info()
-            .is_some_and(|info| info.has_sse2())
+        is_x86_feature_detected!("sse2")
     }
 
     #[inline(always)]

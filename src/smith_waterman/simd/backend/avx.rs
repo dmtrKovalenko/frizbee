@@ -20,9 +20,7 @@ impl Backend for BackendAVX {
     type Score = AvxScore;
 
     fn is_available() -> bool {
-        raw_cpuid::CpuId::new()
-            .get_extended_feature_info()
-            .is_some_and(|info| info.has_avx2())
+        is_x86_feature_detected!("avx2")
     }
 
     #[inline(always)]
