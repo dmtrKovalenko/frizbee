@@ -1,10 +1,10 @@
-use itertools::Itertools;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use super::Matcher;
+use crate::k_merge::k_merge;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match};
+use crate::{Config, Match, match_list};
 
 pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
     needle: S1,
@@ -16,6 +16,10 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
         haystacks.len() < (u32::MAX as usize),
         "haystack index overflow"
     );
+    assert!(threads > 0, "threads must be positive");
+    if threads == 1 {
+        return match_list(needle, haystacks, config);
+    }
 
     if needle.as_ref().is_empty() {
         return (0..haystacks.len())
@@ -74,11 +78,12 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
             .collect();
 
         if config.sort {
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .kmerge()
-                .collect()
+            k_merge(
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap())
+                    .collect::<Vec<_>>(),
+            )
         } else {
             handles
                 .into_iter()

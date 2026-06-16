@@ -27,7 +27,6 @@ harness = false
 bench = false
 
 [dependencies]
-itertools = "0.14" # k-way merge
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
