@@ -19,8 +19,8 @@ pub struct PrefilterAVX {
 
 impl Kernel for PrefilterAVX {
     #[inline(always)]
-    fn new(needle: &[u8]) -> Self {
-        let needle_cases = case_needle(needle);
+    fn new(needle: &[u8], case_sensitive: bool) -> Self {
+        let needle_cases = case_needle(needle, case_sensitive);
         let needle_len = needle_cases.len();
         let mut needle_simd = needle_cases
             .iter()
@@ -34,7 +34,7 @@ impl Kernel for PrefilterAVX {
         }
 
         Self {
-            inner: unsafe { Prefilter::new(needle) },
+            inner: unsafe { Prefilter::new(needle, case_sensitive) },
             needle_len,
             needle_simd,
         }

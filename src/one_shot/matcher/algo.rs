@@ -21,11 +21,12 @@ where
 {
     #[inline(always)]
     pub fn new_impl(needle: &str, config: &Config) -> Self {
+        let case_sensitive = config.casing.respects_case_for(needle.as_bytes());
         let matcher = Self {
             needle: needle.to_string(),
             config: config.clone(),
-            prefilter: P::new(needle.as_bytes()),
-            smith_waterman: S::new(needle.as_bytes(), &config.scoring),
+            prefilter: P::new(needle.as_bytes(), case_sensitive),
+            smith_waterman: S::new(needle.as_bytes(), &config.scoring, case_sensitive),
         };
         matcher.guard_against_score_overflow();
         matcher

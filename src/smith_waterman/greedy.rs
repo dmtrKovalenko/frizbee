@@ -2,7 +2,7 @@
 //! to find the optimal alignment. Runs in linear time and used for when the Smith Waterman matrix
 //! would balloon in size (due to being N * M)
 
-use crate::Scoring;
+use crate::{Scoring, prefilter::case_needle};
 
 const DELIMITERS: [u8; 7] = *b" /.,_-:";
 
@@ -13,6 +13,16 @@ pub fn match_greedy(
     haystack: &[u8],
     scoring: &Scoring,
 ) -> Option<(u16, Vec<usize>)> {
+    match_greedy_case(needle, haystack, scoring, false)
+}
+
+pub(super) fn match_greedy_case(
+    needle: &[u8],
+    haystack: &[u8],
+    scoring: &Scoring,
+    case_sensitive: bool,
+) -> Option<(u16, Vec<usize>)> {
+    let needle = case_needle(needle, case_sensitive);
     let mut score = 0;
     let mut indices = vec![];
     let mut haystack_idx = 0;
@@ -20,22 +30,8 @@ pub fn match_greedy(
     let mut delimiter_bonus_enabled = false;
     let mut previous_haystack_is_lower = false;
     let mut previous_haystack_is_delimiter = false;
-    'outer: for needle_idx in 0..needle.len() {
-        let needle_char = needle[needle_idx];
-        let needle_is_upper = (65..=90).contains(&needle_char);
-        let needle_is_lower = (97..=122).contains(&needle_char);
-
-        let needle_lower_char = if needle_is_upper {
-            needle_char + 32
-        } else {
-            needle_char
-        };
-        let needle_upper_char = if needle_is_lower {
-            needle_char - 32
-        } else {
-            needle_char
-        };
-
+    'outer: for (needle_idx, &(needle_char, flipped_case_needle_char)) in needle.iter().enumerate()
+    {
         let haystack_start_idx = haystack_idx;
         while haystack_idx <= (haystack.len() - needle.len() + needle_idx) {
             let haystack_char = haystack[haystack_idx];
@@ -48,7 +44,7 @@ pub fn match_greedy(
                 delimiter_bonus_enabled = true;
             }
 
-            if needle_lower_char != haystack_char && needle_upper_char != haystack_char {
+            if needle_char != haystack_char && flipped_case_needle_char != haystack_char {
                 previous_haystack_is_delimiter = delimiter_bonus_enabled && haystack_is_delimiter;
                 previous_haystack_is_lower = haystack_is_lower;
                 haystack_idx += 1;

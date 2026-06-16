@@ -54,6 +54,7 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
 pub(crate) struct SmithWaterman<B: Backend> {
     needle: String,
     needle_simd: Vec<(B::Bytes, B::Bytes)>,
+    case_sensitive: bool,
     scoring: Scoring,
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
@@ -64,7 +65,7 @@ pub(crate) struct SmithWaterman<B: Backend> {
 }
 
 pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
-    fn new(needle: &[u8], scoring: &Scoring) -> Self;
+    fn new(needle: &[u8], scoring: &Scoring, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
     #[cfg(test)]
     fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16>;
@@ -93,21 +94,21 @@ mod tests {
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
         let score = matcher.match_haystack(haystack.as_bytes(), Some(0));
         score.unwrap()
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
         let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
 
         matcher.match_haystack(haystack.as_bytes(), Some(max_typos))
     }
 
     fn get_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
         let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
 
         matcher
             .match_haystack_indices(haystack.as_bytes(), 0, None)
@@ -203,7 +204,7 @@ mod tests {
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default());
+            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
         matcher.match_haystack(haystack.as_bytes(), None);
         matcher.match_end_col(haystack.as_bytes())
     }
@@ -289,12 +290,12 @@ mod tests {
     }
 
     fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default());
+        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
         matcher.match_haystack(haystack.as_bytes(), None).unwrap()
     }
 
     fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
-        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default());
+        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
         matcher
             .match_haystack_indices(haystack.as_bytes(), 0, None)
             .map(|(_, indices)| indices)

@@ -19,8 +19,8 @@ impl<B: Backend> Prefilter<B> {
     /// # Safety
     /// The backend's target features must be enabled.
     #[inline(always)]
-    pub unsafe fn new(needle: &[u8]) -> Self {
-        let needle = case_needle(needle)
+    pub unsafe fn new(needle: &[u8], case_sensitive: bool) -> Self {
+        let needle = case_needle(needle, case_sensitive)
             .iter()
             .map(|&(c1, c2)| unsafe { B::broadcast(c1, c2) })
             .collect();

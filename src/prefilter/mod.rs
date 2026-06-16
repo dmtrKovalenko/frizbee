@@ -18,13 +18,15 @@ pub(crate) mod backend;
 use algo::Prefilter;
 use backend::Backend;
 
-pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
+pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> {
     needle
         .iter()
         .map(|&c| {
             (
                 c,
-                if c.is_ascii_lowercase() {
+                if case_sensitive {
+                    c
+                } else if c.is_ascii_lowercase() {
                     c.to_ascii_uppercase()
                 } else {
                     c.to_ascii_lowercase()
@@ -38,7 +40,7 @@ pub(crate) type Window = (bool, usize, usize);
 
 /// Ordered prefiltering kernel which allows score-level false positives.
 pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
-    fn new(needle: &[u8]) -> Self;
+    fn new(needle: &[u8], case_sensitive: bool) -> Self;
     fn is_available() -> bool;
 
     fn match_haystack(&self, haystack: &[u8]) -> Window;
@@ -49,8 +51,8 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
 
 impl<B: Backend> Kernel for Prefilter<B> {
     #[inline(always)]
-    fn new(needle: &[u8]) -> Self {
-        unsafe { Self::new(needle) }
+    fn new(needle: &[u8], case_sensitive: bool) -> Self {
+        unsafe { Self::new(needle, case_sensitive) }
     }
 
     #[inline(always)]
@@ -89,6 +91,10 @@ mod tests {
 
     fn matched(needle: &str, haystack: &str, max_typos: u16) -> bool {
         result(needle, haystack, max_typos).0
+    }
+
+    fn matched_sensitive(needle: &str, haystack: &str, max_typos: u16) -> bool {
+        kernel_result::<PrefilterScalar>(needle.as_bytes(), haystack.as_bytes(), max_typos, true).0
     }
 
     #[test]
@@ -144,6 +150,25 @@ mod tests {
     }
 
     #[test]
+    fn case_sensitive_matching_cases() {
+        for (needle, haystack, max_typos, want) in [
+            ("foo", "foo", 0, true),
+            ("foo", "FOO", 0, false),
+            ("FoO", "xxFoOxx", 0, true),
+            ("abc", "xaxbxcx", 0, true),
+            ("abc", "xAxBxCx", 0, false),
+            ("TeSt", "eS", 2, true),
+            ("TeSt", "ES", 2, false),
+        ] {
+            assert_eq!(
+                matched_sensitive(needle, haystack, max_typos),
+                want,
+                "needle={needle:?} haystack={haystack:?} max_typos={max_typos}"
+            );
+        }
+    }
+
+    #[test]
     fn returned_windows_are_conservative() {
         assert_eq!(result("foo", "xxfooxfoo", 0), (true, 2, 9));
         assert_eq!(result("abc", "xxaybzczz", 0), (true, 2, 7));
@@ -178,7 +203,7 @@ mod tests {
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
         let scalar_result =
-            kernel_result::<PrefilterScalar>(needle.as_bytes(), haystack, max_typos);
+            kernel_result::<PrefilterScalar>(needle.as_bytes(), haystack, max_typos, false);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -186,19 +211,19 @@ mod tests {
 
             if PrefilterAVX::is_available() {
                 let avx_result =
-                    kernel_result::<PrefilterAVX>(needle.as_bytes(), haystack, max_typos);
+                    kernel_result::<PrefilterAVX>(needle.as_bytes(), haystack, max_typos, false);
                 assert_same_result(avx_result, scalar_result, "AVX2 mismatch");
             }
 
             if PrefilterSSE::is_available() {
                 let sse_result =
-                    kernel_result::<PrefilterSSE>(needle.as_bytes(), haystack, max_typos);
+                    kernel_result::<PrefilterSSE>(needle.as_bytes(), haystack, max_typos, false);
                 assert_same_result(sse_result, scalar_result, "SSE mismatch");
             }
 
             if PrefilterAVX512::is_available() {
                 let avx512_result =
-                    kernel_result::<PrefilterAVX512>(needle.as_bytes(), haystack, max_typos);
+                    kernel_result::<PrefilterAVX512>(needle.as_bytes(), haystack, max_typos, false);
                 assert_same_result(avx512_result, scalar_result, "AVX-512 mismatch");
             }
         }
@@ -208,15 +233,20 @@ mod tests {
             use crate::prefilter::backend::PrefilterNEON;
 
             let neon_result =
-                kernel_result::<PrefilterNEON>(needle.as_bytes(), haystack, max_typos);
+                kernel_result::<PrefilterNEON>(needle.as_bytes(), haystack, max_typos, false);
             assert_same_result(neon_result, scalar_result, "NEON mismatch");
         }
 
         scalar_result
     }
 
-    fn kernel_result<P: Kernel>(needle: &[u8], haystack: &[u8], max_typos: u16) -> Window {
-        let mut prefilter = P::new(needle);
+    fn kernel_result<P: Kernel>(
+        needle: &[u8],
+        haystack: &[u8],
+        max_typos: u16,
+        case_sensitive: bool,
+    ) -> Window {
+        let mut prefilter = P::new(needle, case_sensitive);
         match max_typos {
             0 => prefilter.match_haystack(haystack),
             1 => prefilter.match_haystack_1_typo(haystack),

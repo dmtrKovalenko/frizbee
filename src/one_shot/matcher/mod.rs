@@ -158,6 +158,7 @@ impl Matcher {
 mod tests {
     use super::super::match_list;
     use super::*;
+    use crate::CaseMatching;
 
     #[test]
     fn test_basic() {
@@ -241,6 +242,51 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
         assert!(matches[0].exact);
+    }
+
+    #[test]
+    fn test_case_sensitive_matching() {
+        let haystack = ["foo", "FOO", "fOo", "xxfooxx"];
+        let config = Config {
+            sort: false,
+            ..Config::default()
+        };
+
+        let matches = match_list("foo", &haystack, &config);
+        assert_eq!(
+            matches.iter().map(|m| m.index).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+
+        let config = Config {
+            casing: CaseMatching::Respect,
+            sort: false,
+            ..Config::default()
+        };
+
+        let matches = match_list("foo", &haystack, &config);
+        assert_eq!(
+            matches.iter().map(|m| m.index).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
+
+        let indices = Matcher::new("foo", &config).match_list_indices(&haystack);
+        assert_eq!(
+            indices.iter().map(|m| m.index).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
+
+        let config = Config {
+            casing: CaseMatching::Smart,
+            sort: false,
+            ..Config::default()
+        };
+
+        let matches = match_list("FoO", &["foo", "FOO", "FoO", "xxFoOxx"], &config);
+        assert_eq!(
+            matches.iter().map(|m| m.index).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
     }
 
     #[test]
