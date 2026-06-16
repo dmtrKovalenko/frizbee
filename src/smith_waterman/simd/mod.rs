@@ -13,7 +13,7 @@ mod alignment_iter;
 pub(crate) mod backend;
 mod matrix;
 
-pub use alignment_iter::{Alignment, AlignmentPathIter};
+pub use alignment_iter::AlignmentPathIter;
 
 #[cfg(target_arch = "x86_64")]
 pub type SmithWatermanAVX512U8 = SmithWaterman<BackendAVX512U8>;
@@ -84,11 +84,7 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
 mod tests {
     use super::*;
     use crate::r#const::*;
-    use crate::smith_waterman::simd::backend::{Backend, BackendScalar8, BackendScalar16U8};
-    #[cfg(target_arch = "x86_64")]
-    use crate::smith_waterman::simd::backend::{
-        BackendAVX, BackendAVX512, BackendAVX512U8, BackendAVXU8, BackendSSE, BackendSSEU8,
-    };
+    use crate::smith_waterman::simd::backend::BackendScalar8;
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
@@ -220,6 +216,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "match_end_col")]
+    fn long_input_end_col_uses_original_haystack_offsets() {
+        let haystack = format!("{}abc", "x".repeat(510));
+        assert_eq!(get_end_col("abc", &haystack), 512);
+    }
+
+    #[test]
     fn test_score_typos() {
         assert_eq!(get_score_typos("foo", "Ufooo", 0), Some(CHAR_SCORE * 3));
         assert_eq!(get_score_typos("foo", "Ufo", 0), None);
@@ -251,150 +254,16 @@ mod tests {
         assert_eq!(get_indices("foo", "Uf"), Some(vec![1]));
     }
 
-    // ---------------------------------------------------------------
-    // Cross-backend parity: every available backend should produce the same
-    // scores and the same alignment-path indices as the runtime-selected
-    // backend. With Phase 2 this covers u8 and u16 paths on each
-    // architecture.
-    // ---------------------------------------------------------------
-
-    fn cases() -> Vec<(&'static str, &'static str)> {
-        vec![
-            // short
-            ("a", "abc"),
-            ("abc", "abc"),
-            ("foo", "fooBar"),
-            // crossing 8-byte chunk boundary (SSE u16 LANES = 8)
-            ("foo", "012345foo"),
-            ("foo", "01234567foo"),
-            ("foo", "0123456789foo"),
-            // crossing 16-byte boundary (AVX u16, SSE u8 LANES = 16)
-            ("foo", "0123456789012345foo"),
-            // crossing 32-byte boundary (AVX u8 LANES = 32)
-            ("foo", "0123456789012345678901234567foo"),
-            // ranges that cross multiple chunks for all widths
-            ("test", "Utooooeoooosoooot"),
-            ("test", "Utooooooeoooooosoooooot"),
-            // typos
-            ("foo", "Ufooo"),
-            ("foo", "Ufo"),
-            // delimiter / capitalization
-            ("hw", "hello_world"),
-            ("fBr", "fooBar"),
-            ("D", "FOR_DIST"),
-            // long needles (some short enough for u8, some not)
-            ("needle", "____________needle____________"),
-            ("abcdefghij", "abcdefghij"),
-            ("abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
-        ]
-    }
-
-    fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
-        matcher.match_haystack(haystack.as_bytes(), None).unwrap()
-    }
-
-    fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
-        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
-        matcher
-            .match_haystack_indices(haystack.as_bytes(), 0, None)
-            .map(|(_, indices)| indices)
-    }
-
-    fn assert_score_backend<B: Backend>(label: &str, needle: &str, haystack: &str, want: u16) {
-        if B::is_available() {
-            let got = score_with::<B>(needle, haystack);
-            assert_eq!(
-                got, want,
-                "{label} score mismatch for needle={needle:?} haystack={haystack:?}"
-            );
-        }
-    }
-
-    fn assert_indices_backend<B: Backend>(
-        label: &str,
-        needle: &str,
-        haystack: &str,
-        want: Option<Vec<usize>>,
-    ) {
-        if B::is_available() {
-            let got = indices_with::<B>(needle, haystack);
-            assert_eq!(
-                got, want,
-                "{label} indices mismatch for needle={needle:?} haystack={haystack:?}"
-            );
-        }
-    }
-
     #[test]
-    fn cross_backend_parity_score() {
-        for (needle, haystack) in cases() {
-            let want = score_with::<BackendScalar8>(needle, haystack);
-
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert_score_backend::<BackendSSE>("SSE-u16", needle, haystack, want);
-                assert_score_backend::<BackendAVX512>("AVX-512-u16", needle, haystack, want);
-                assert_score_backend::<BackendAVX>("AVX-u16", needle, haystack, want);
-
-                if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                    assert_score_backend::<BackendSSEU8>("SSE-u8", needle, haystack, want);
-                    assert_score_backend::<BackendAVXU8>("AVX-u8", needle, haystack, want);
-                    assert_score_backend::<BackendAVX512U8>("AVX-512-u8", needle, haystack, want);
-                }
-            }
-
-            assert_score_backend::<BackendScalar8>("Scalar-u16", needle, haystack, want);
-
-            if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                assert_score_backend::<BackendScalar16U8>("Scalar-u8", needle, haystack, want);
-            }
-        }
-    }
-
-    #[test]
-    fn cross_backend_parity_indices() {
-        for (needle, haystack) in cases() {
-            let want = indices_with::<BackendScalar8>(needle, haystack);
-
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert_indices_backend::<BackendSSE>("SSE-u16", needle, haystack, want.clone());
-                assert_indices_backend::<BackendAVX512>(
-                    "AVX-512-u16",
-                    needle,
-                    haystack,
-                    want.clone(),
-                );
-                assert_indices_backend::<BackendAVX>("AVX-u16", needle, haystack, want.clone());
-
-                if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                    assert_indices_backend::<BackendSSEU8>(
-                        "SSE-u8",
-                        needle,
-                        haystack,
-                        want.clone(),
-                    );
-                    assert_indices_backend::<BackendAVXU8>(
-                        "AVX-u8",
-                        needle,
-                        haystack,
-                        want.clone(),
-                    );
-                    assert_indices_backend::<BackendAVX512U8>(
-                        "AVX-512-u8",
-                        needle,
-                        haystack,
-                        want.clone(),
-                    );
-                }
-            }
-
-            assert_indices_backend::<BackendScalar8>("Scalar-u16", needle, haystack, want.clone());
-
-            if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                assert_indices_backend::<BackendScalar16U8>("Scalar-u8", needle, haystack, want);
-            }
+    fn long_input_boundary_indices_stay_reverse_ordered() {
+        for len in [511usize, 512, 513] {
+            let haystack = format!("{}abc", "x".repeat(len - 3));
+            assert!(get_score("abc", &haystack) > 0, "len={len}");
+            assert_eq!(
+                get_indices("abc", &haystack),
+                Some(vec![len - 1, len - 2, len - 3]),
+                "len={len}"
+            );
         }
     }
 }

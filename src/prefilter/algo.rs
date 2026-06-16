@@ -124,6 +124,20 @@ impl<B: Backend> Prefilter<B> {
                 loop {
                     let mut advanced = false;
 
+                    let candidate_idx = i0 + 1;
+                    if candidate_idx > i1 {
+                        if candidate_idx == needle_len {
+                            return unsafe { self.found_with_typos(haystack, match_start_pos, 1) };
+                        }
+                        i1 = candidate_idx;
+                        m1 = m0;
+                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
+                        advanced = true;
+                    } else if candidate_idx == i1 && m0 > m1 {
+                        m1 = m0;
+                        advanced = true;
+                    }
+
                     let hit0 = occ0.and(m0);
                     if !hit0.is_zero() {
                         match_start_pos =
@@ -138,20 +152,6 @@ impl<B: Backend> Prefilter<B> {
                         } else {
                             unsafe { B::occ(chunk, self.needle_unchecked(i0)) }
                         };
-                        advanced = true;
-                    }
-
-                    let candidate_idx = i0 + 1;
-                    if candidate_idx > i1 {
-                        if candidate_idx == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 1) };
-                        }
-                        i1 = candidate_idx;
-                        m1 = m0;
-                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-                        advanced = true;
-                    } else if candidate_idx == i1 && m0 > m1 {
-                        m1 = m0;
                         advanced = true;
                     }
 
@@ -220,17 +220,6 @@ impl<B: Backend> Prefilter<B> {
                 loop {
                     let mut advanced = false;
 
-                    let hit0 = occ0.and(m0);
-                    if !hit0.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit0) });
-                        m0 = unsafe { B::clear_through_lowest(m0, hit0) };
-                        i0 += 1;
-                        debug_assert!(i0 < needle_len);
-                        occ0 = unsafe { B::occ(chunk, self.needle_unchecked(i0)) };
-                        advanced = true;
-                    }
-
                     let cand1 = i0 + 1;
                     if cand1 > i1 {
                         if cand1 == needle_len {
@@ -245,19 +234,6 @@ impl<B: Backend> Prefilter<B> {
                         advanced = true;
                     }
 
-                    let hit1 = occ1.and(m1);
-                    if !hit1.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit1) });
-                        m1 = unsafe { B::clear_through_lowest(m1, hit1) };
-                        i1 += 1;
-                        if i1 == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
-                        }
-                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-                        advanced = true;
-                    }
-
                     let cand2 = i1 + 1;
                     if cand2 > i2 {
                         if cand2 == needle_len {
@@ -269,6 +245,30 @@ impl<B: Backend> Prefilter<B> {
                         advanced = true;
                     } else if cand2 == i2 && m1 > m2 {
                         m2 = m1;
+                        advanced = true;
+                    }
+
+                    let hit0 = occ0.and(m0);
+                    if !hit0.is_zero() {
+                        match_start_pos =
+                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit0) });
+                        m0 = unsafe { B::clear_through_lowest(m0, hit0) };
+                        i0 += 1;
+                        debug_assert!(i0 < needle_len);
+                        occ0 = unsafe { B::occ(chunk, self.needle_unchecked(i0)) };
+                        advanced = true;
+                    }
+
+                    let hit1 = occ1.and(m1);
+                    if !hit1.is_zero() {
+                        match_start_pos =
+                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit1) });
+                        m1 = unsafe { B::clear_through_lowest(m1, hit1) };
+                        i1 += 1;
+                        if i1 == needle_len {
+                            return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
+                        }
+                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
                         advanced = true;
                     }
 
@@ -486,23 +486,18 @@ pub(crate) unsafe fn load_window<B: Backend>(
 
         let mask = B::Mask::first_n(remaining);
         let ptr = haystack.as_ptr().add(start);
-        #[cfg(feature = "safe_read")]
-        {
+        if can_overread(ptr, B::LANES) {
+            (B::load(ptr), mask)
+        } else {
             (B::load_partial(ptr, remaining, mask), mask)
-        }
-        #[cfg(not(feature = "safe_read"))]
-        {
-            if can_overread(ptr, B::LANES) {
-                (B::load(ptr), mask)
-            } else {
-                (B::load_partial(ptr, remaining, mask), mask)
-            }
         }
     }
 }
 
-#[cfg(not(feature = "safe_read"))]
 #[inline(always)]
 pub(crate) fn can_overread(ptr: *const u8, bytes: usize) -> bool {
+    if cfg!(feature = "safe_read") || cfg!(miri) {
+        return false;
+    }
     (ptr as usize & 0xFFF) <= (4096 - bytes)
 }

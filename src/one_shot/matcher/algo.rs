@@ -1,7 +1,7 @@
 use super::Matcher;
 use crate::prefilter::{Kernel as PrefilterKernel, Window};
 use crate::smith_waterman::simd::Kernel as SmithWatermanKernel;
-use crate::sort::radix_sort_matches;
+use crate::sort::radix_sort;
 use crate::{Config, Match, MatchIndices};
 
 const MANY_TYPOS: u16 = u16::MAX;
@@ -42,7 +42,7 @@ where
         self.match_list_into_impl(haystacks, 0, &mut matches);
 
         if self.config.sort {
-            radix_sort_matches(&mut matches);
+            radix_sort(&mut matches);
         }
 
         matches
@@ -131,7 +131,7 @@ where
     ) {
         let mut index = haystack_index_offset;
         for haystack_str in haystacks {
-            matches.push(self.smith_waterman_one(haystack_str.as_ref().as_bytes(), index, true));
+            matches.push(self.smith_waterman_one(haystack_str.as_ref().as_bytes(), index, 0, true));
             index += 1;
         }
     }
@@ -155,7 +155,12 @@ where
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
-                    matches.push(self.smith_waterman_one(trimmed, index as u32, include_exact));
+                    matches.push(self.smith_waterman_one(
+                        trimmed,
+                        index as u32,
+                        start_pos,
+                        include_exact,
+                    ));
                 }
             }
             index += 1;
@@ -225,7 +230,13 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_one(&mut self, haystack: &[u8], index: u32, include_exact: bool) -> Match {
+    fn smith_waterman_one(
+        &mut self,
+        haystack: &[u8],
+        index: u32,
+        haystack_start_pos: usize,
+        include_exact: bool,
+    ) -> Match {
         let mut score = self.smith_waterman.score_haystack(haystack);
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -233,12 +244,18 @@ where
             score += self.config.scoring.exact_match_bonus;
         }
 
+        #[cfg(not(feature = "match_end_col"))]
+        let _ = haystack_start_pos;
+
         Match {
             index,
             score,
             exact,
             #[cfg(feature = "match_end_col")]
-            end_col: self.smith_waterman.match_end_col(haystack),
+            end_col: self
+                .smith_waterman
+                .match_end_col(haystack)
+                .saturating_add(haystack_start_pos.min(u16::MAX as usize) as u16),
         }
     }
 
@@ -293,5 +310,57 @@ where
             self.needle.len(),
             max_needle_len
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Config, match_list, match_list_indices};
+
+    #[test]
+    fn unsorted_output_preserves_candidate_order() {
+        let haystacks = ["foo", "nomatch", "xfoo", "f_o_o", "bar"];
+        let config = Config {
+            sort: false,
+            ..Config::default()
+        };
+
+        let matches = match_list("foo", &haystacks, &config);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|match_| match_.index)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 3]
+        );
+    }
+
+    #[test]
+    fn match_list_indices_reports_expected_public_indices() {
+        let haystacks = ["xabcx", "a_b_c", "nomatch"];
+        let config = Config {
+            sort: false,
+            ..Config::default()
+        };
+
+        let matches = match_list_indices("abc", &haystacks, &config);
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].index, 0);
+        assert_eq!(matches[0].indices, vec![3, 2, 1]);
+        assert_eq!(matches[1].index, 1);
+        assert_eq!(matches[1].indices, vec![4, 2, 0]);
+    }
+
+    #[test]
+    #[cfg(feature = "match_end_col")]
+    fn filtered_match_end_col_uses_original_haystack_offsets() {
+        let config = Config {
+            sort: false,
+            ..Config::default()
+        };
+
+        let matches = match_list("abc", &["xxabcxx"], &config);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].end_col, 4);
     }
 }

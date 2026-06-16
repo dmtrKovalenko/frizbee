@@ -3,7 +3,6 @@ use super::backend::{Backend, ScoreVec};
 #[derive(Debug, Clone)]
 pub struct Matrix<B: Backend> {
     pub matrix: Vec<B::Score>,
-    pub needle_len: usize,
     /// Number of LANES-wide chunks per row, including the leading zero column.
     pub haystack_chunks: usize,
 }
@@ -17,7 +16,6 @@ impl<B: Backend> Matrix<B> {
             .collect();
         Self {
             matrix,
-            needle_len,
             haystack_chunks,
         }
     }

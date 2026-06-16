@@ -2,33 +2,10 @@ use super::backend::{Backend, ScoreVec};
 use super::matrix::Matrix;
 
 pub enum Alignment {
-    Left((usize, usize)),
-    Up((usize, usize)),
+    Left,
+    Up,
     Match((usize, usize)),
-    Mismatch((usize, usize)),
-}
-
-impl Alignment {
-    pub fn pos(&self) -> (usize, usize) {
-        match self {
-            Alignment::Left(pos) | Alignment::Up(pos) => *pos,
-            Alignment::Match(pos) | Alignment::Mismatch(pos) => *pos,
-        }
-    }
-
-    pub fn col(&self) -> usize {
-        match self {
-            Alignment::Left((_, col)) | Alignment::Up((_, col)) => *col,
-            Alignment::Match((_, col)) | Alignment::Mismatch((_, col)) => *col,
-        }
-    }
-
-    pub fn row(&self) -> usize {
-        match self {
-            Alignment::Left((row, _)) | Alignment::Up((row, _)) => *row,
-            Alignment::Match((row, _)) | Alignment::Mismatch((row, _)) => *row,
-        }
-    }
+    Mismatch,
 }
 
 /// Iterator over alignment path positions with support for max typos.
@@ -180,7 +157,7 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             if diag >= self.score {
                 self.typo_count += 1;
                 self.score = diag;
-                return Some(Some(Alignment::Mismatch(current_pos)));
+                return Some(Some(Alignment::Mismatch));
             }
             self.score = diag;
             Some(Some(Alignment::Match(current_pos)))
@@ -188,13 +165,13 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
         } else if left >= up {
             self.col_idx -= 1;
             self.score = left;
-            Some(Some(Alignment::Left(current_pos)))
+            Some(Some(Alignment::Left))
         // Skipped character in needle (up)
         } else {
             self.typo_count += 1;
             self.row_idx -= 1;
             self.score = up;
-            Some(Some(Alignment::Up(current_pos)))
+            Some(Some(Alignment::Up))
         }
     }
 }

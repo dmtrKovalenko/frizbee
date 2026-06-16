@@ -62,10 +62,6 @@ impl BytesVec for Scalar8Bytes {
     type Mask = Scalar8Bytes;
 
     #[inline(always)]
-    unsafe fn zero() -> Self {
-        Self([0; 8])
-    }
-    #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         Self([value; 8])
     }
@@ -310,10 +306,6 @@ impl Backend for BackendScalar16U8 {
 impl BytesVec for Scalar16U8Bytes {
     type Mask = Scalar16U8Bytes;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        Self([0; 16])
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         Self([value; 16])

@@ -6,17 +6,7 @@ use crate::{Scoring, prefilter::case_needle};
 
 const DELIMITERS: [u8; 7] = *b" /.,_-:";
 
-/// Fallback fuzzy matching algorithm for large haystacks. Finds the first possible match rather than
-/// the optimal alignment.
 pub fn match_greedy(
-    needle: &[u8],
-    haystack: &[u8],
-    scoring: &Scoring,
-) -> Option<(u16, Vec<usize>)> {
-    match_greedy_case(needle, haystack, scoring, false)
-}
-
-pub(super) fn match_greedy_case(
     needle: &[u8],
     haystack: &[u8],
     scoring: &Scoring,
@@ -100,9 +90,14 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        match_greedy(needle.as_bytes(), haystack.as_bytes(), &Scoring::default())
-            .map(|(score, _)| score)
-            .unwrap_or_default()
+        match_greedy(
+            needle.as_bytes(),
+            haystack.as_bytes(),
+            &Scoring::default(),
+            false,
+        )
+        .map(|(score, _)| score)
+        .unwrap_or_default()
     }
 
     #[test]

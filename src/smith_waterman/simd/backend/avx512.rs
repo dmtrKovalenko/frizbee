@@ -79,9 +79,9 @@ impl Backend for BackendAVX512U8 {
     type Score = Avx512U8Score;
 
     fn is_available() -> bool {
-        raw_cpuid::CpuId::new()
-            .get_extended_feature_info()
-            .is_some_and(|info| info.has_avx512f() && info.has_avx512bw() && info.has_avx512vbmi())
+        is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("avx512vbmi")
     }
 
     #[inline(always)]
@@ -115,10 +115,6 @@ impl Backend for BackendAVX512U8 {
 impl BytesVec for Avx512Bytes {
     type Mask = Avx512Mask;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(_mm512_setzero_si512()) }
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         unsafe { Self(_mm512_set1_epi8(value as i8)) }
@@ -167,10 +163,6 @@ impl BytesVec for Avx512Bytes {
 impl BytesVec for Avx512U8Bytes {
     type Mask = Avx512U8Mask;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(_mm512_setzero_si512()) }
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         unsafe { Self(_mm512_set1_epi8(value as i8)) }
@@ -468,6 +460,30 @@ unsafe fn shift_right_u16_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __
     match L {
         0 => cur,
         32 => prev,
+
+        _ if cfg!(miri) => unsafe {
+            // Miri doesn't support _mm512_permutex2var_epi16, so use a fallback implementation
+            // TODO: add support to Miri
+            let mut cur_arr = [0u16; 32];
+            _mm512_storeu_si512(cur_arr.as_mut_ptr() as *mut __m512i, cur);
+
+            let mut prev_arr = [0u16; 32];
+            _mm512_storeu_si512(prev_arr.as_mut_ptr() as *mut __m512i, prev);
+
+            let mut shifted = [0u16; 32];
+            std::ptr::copy_nonoverlapping(
+                cur_arr.as_ptr(),
+                shifted.as_mut_ptr().add(L as usize),
+                32 - L as usize,
+            );
+            std::ptr::copy_nonoverlapping(
+                prev_arr.as_ptr().add(32 - L as usize),
+                shifted.as_mut_ptr(),
+                L as usize,
+            );
+            _mm512_loadu_si512(shifted.as_ptr() as *const __m512i)
+        },
+
         _ => {
             let idx_arr: [u16; 32] = const {
                 let mut arr = [0u16; 32];
@@ -496,6 +512,29 @@ unsafe fn shift_right_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __m512
         8 => unsafe { _mm512_alignr_epi64::<7>(cur, prev) },
         16 => unsafe { _mm512_alignr_epi64::<6>(cur, prev) },
         32 => unsafe { _mm512_alignr_epi64::<4>(cur, prev) },
+
+        _ if cfg!(miri) => unsafe {
+            // Miri doesn't support _mm512_permutex2var_epi16, so use a fallback implementation
+            // TODO: add support to Miri
+            let mut cur_arr = [0u8; 64];
+            _mm512_store_si512(cur_arr.as_mut_ptr() as *mut __m512i, cur);
+
+            let mut prev_arr = [0u8; 64];
+            _mm512_store_si512(prev_arr.as_mut_ptr() as *mut __m512i, prev);
+
+            let mut shifted = [0u8; 64];
+            std::ptr::copy_nonoverlapping(
+                cur_arr.as_ptr(),
+                shifted.as_mut_ptr().add(L as usize),
+                64 - L as usize,
+            );
+            std::ptr::copy_nonoverlapping(
+                prev_arr.as_ptr().add(64 - L as usize),
+                shifted.as_mut_ptr(),
+                L as usize,
+            );
+            _mm512_loadu_si512(shifted.as_ptr() as *const __m512i)
+        },
 
         // fallback to byte permute
         _ => {

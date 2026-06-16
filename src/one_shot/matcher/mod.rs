@@ -350,6 +350,57 @@ mod tests {
     }
 
     #[test]
+    fn reuse_handles_state_changes() {
+        let long_needle = "abcdefghijklmnopqrst";
+        let first_haystacks = [
+            "xxabcdefghijklmnopqrstxx".to_string(),
+            "abcdefghijklmnopqrst".to_string(),
+            "no-match".to_string(),
+        ];
+        let first_config = Config {
+            max_typos: None,
+            sort: false,
+            ..Config::default()
+        };
+        let mut matcher = Matcher::new(long_needle, &first_config);
+
+        let first = matcher.match_list(&first_haystacks);
+        assert_eq!(
+            &first,
+            &match_list(long_needle, &first_haystacks, &first_config)
+        );
+
+        let second_haystacks = [
+            "fooBar".to_string(),
+            "foo_bar".to_string(),
+            "fbr".to_string(),
+            "bar".to_string(),
+        ];
+        matcher.set_needle("fB");
+        let second_config = Config {
+            casing: CaseMatching::Smart,
+            sort: false,
+            ..Config::default()
+        };
+        matcher.set_config(second_config.clone());
+        let second = matcher.match_list(&second_haystacks);
+        assert_eq!(
+            &second,
+            &match_list("fB", &second_haystacks, &second_config)
+        );
+
+        let third_config = Config {
+            casing: CaseMatching::Ignore,
+            max_typos: Some(1),
+            sort: true,
+            ..Config::default()
+        };
+        matcher.set_config(third_config.clone());
+        let third = matcher.match_list(&first_haystacks);
+        assert_eq!(&third, &match_list("fB", &first_haystacks, &third_config));
+    }
+
+    #[test]
     #[cfg(feature = "match_end_col")]
     fn test_match_end_col_through_match_list() {
         let config = Config {

@@ -38,3 +38,21 @@ jobs:
       - name: Run tests
         if: matrix.arch == 'x64'
         run: cargo test --verbose
+
+  miri:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Miri
+        run: rustup toolchain install nightly --component miri,rust-src
+
+      - name: Set up Miri
+        run: cargo +nightly miri setup
+
+      - name: Run Miri tests
+        run: cargo +nightly miri test
+
+      - name: Run Miri tests with match_end_col
+        run: cargo +nightly miri test --features match_end_col

@@ -139,7 +139,7 @@ Frizbee previously used inter-sequence parallelism (one needle, $LANES haystacks
 
 ### Multithreading
 
-The parallel implementation uses work-stealing to distribute the work across threads. Each thread sorts the matches individually and the final result uses k-way merge for concatenation. In the chromium benchmark, this gets reasonably close to perfect scaling: 7.6ms vs 6.8ms (theoretical perfect)
+The parallel implementation uses work-stealing to distribute the work across threads. Each thread sorts the matches individually and the final result uses k-way merge for concatenation. In the chromium benchmark, this gets reasonably close to perfect scaling: 3.6ms vs 2.8ms (theoretical perfect)
 
 ### Scoring
 
@@ -152,3 +152,9 @@ The parallel implementation uses work-stealing to distribute the work across thr
 - `CAPITALIZATION_BONUS`: Bonus for matching a capital letter after a lowercase letter (e.g. "b" on "fooBar" will receive a bonus on "B")
 - `MATCHING_CASE_BONUS`: Bonus for matching the case of the needle (e.g. "WorLd" on "WoRld" will receive a bonus on "W", "o", "d")
 - `EXACT_MATCH_BONUS`: Bonus for matching the exact needle (e.g. "foo" on "foo" will receive the bonus)
+
+## Safety
+
+On stable Rust, it's only possible to use SIMD via intrinsics ([portable-simd](https://github.com/rust-lang/portable-simd) is nightly-only). Many existing crates for safe SIMD abstractions do not currently support AVX512, or left performance on the table. The codebase isolates the vast majority of the unsafe code to SIMD "Backend"s ([prefilter]() and [smith waterman]()) which contain many unit/property tests, checked through Miri.
+
+Without the `safe_read` feature, Frizbee will over-read haystacks when safe to do so (within page-boundary) which will trigger the `AddressSanitizer`. Without AVX512, performance regresses by ~40% with this feature enabled. Over-reads are automatically disabled when running inside of miri (`cfg!(miri)`). You'll likely need to enable `safe_read` when running fuzzing.

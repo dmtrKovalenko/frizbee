@@ -1,5 +1,7 @@
 use std::arch::x86_64::*;
 
+use crate::prefilter::algo::can_overread;
+
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 8-lane u16 scoring (128-bit __mm128i), 8-lane u8 input (low half of __m128i).
@@ -81,28 +83,20 @@ impl SseBytes {
                 }
                 7 => {
                     let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = (ptr.add(4) as *const u32).read_unaligned() as u64;
-                    lo | ((hi & 0xFFFFFF) << 32)
+                    let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
+                    let hi = *ptr.add(6) as u64;
+                    lo | (mid << 32) | (hi << 48)
                 }
                 _ => std::hint::unreachable_unchecked(),
             };
             _mm_cvtsi64_si128(val as i64)
         }
     }
-
-    #[inline(always)]
-    fn can_overread_8(ptr: *const u8) -> bool {
-        (ptr as usize & 0xFFF) <= (4096 - 8)
-    }
 }
 
 impl BytesVec for SseBytes {
     type Mask = SseBytes;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(_mm_setzero_si128()) }
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         unsafe { Self(_mm_set1_epi8(value as i8)) }
@@ -142,7 +136,7 @@ impl BytesVec for SseBytes {
             let ptr = data.add(start);
             Self(match remaining {
                 8.. => _mm_loadl_epi64(ptr as *const __m128i),
-                1..=7 if Self::can_overread_8(ptr) => {
+                1..=7 if can_overread(ptr, 8) => {
                     let lo = _mm_loadl_epi64(ptr as *const __m128i);
                     let mask = _mm_set_epi64x(0, (1i64 << (remaining * 8)) - 1);
                     _mm_and_si128(lo, mask)
@@ -347,10 +341,6 @@ impl Backend for BackendSSEU8 {
 impl BytesVec for SseU8Bytes {
     type Mask = SseU8Bytes;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(_mm_setzero_si128()) }
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         unsafe { Self(_mm_set1_epi8(value as i8)) }

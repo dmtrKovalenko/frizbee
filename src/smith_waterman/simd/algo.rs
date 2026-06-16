@@ -1,5 +1,5 @@
 use crate::smith_waterman::simd::Kernel;
-use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy_case};
+use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy};
 
 use super::SmithWaterman;
 use super::alignment_iter::Alignment;
@@ -33,7 +33,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
     #[inline(always)]
     fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy_case(
+            return match_greedy(
                 self.needle.as_bytes(),
                 haystack,
                 &self.scoring,
@@ -57,15 +57,27 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)> {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy_case(
+            return match_greedy(
                 self.needle.as_bytes(),
                 haystack,
                 &self.scoring,
                 self.case_sensitive,
-            );
+            )
+            .map(|(score, mut indices)| {
+                indices.reverse();
+                (score, indices)
+            });
         }
 
         let score = self.score_haystack(haystack);
+        if score == 0 {
+            if let Some(max_typos) = max_typos
+                && self.needle.len() > max_typos as usize
+            {
+                return None;
+            }
+            return Some((score, Vec::new()));
+        }
 
         let mut indices = Vec::with_capacity(self.needle.len());
         let mut prev_haystack_idx = usize::MAX;
@@ -88,7 +100,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
     #[inline(always)]
     fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy_case(
+            return match_greedy(
                 self.needle.as_bytes(),
                 haystack,
                 &self.scoring,
@@ -231,7 +243,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy_case(
+            return match_greedy(
                 self.needle.as_bytes(),
                 haystack,
                 &self.scoring,

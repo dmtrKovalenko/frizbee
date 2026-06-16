@@ -1,3 +1,4 @@
+use crate::prefilter::algo::can_overread;
 use std::arch::aarch64::*;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
@@ -77,28 +78,20 @@ impl NeonBytes {
                 }
                 7 => {
                     let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = (ptr.add(4) as *const u32).read_unaligned() as u64;
-                    lo | ((hi & 0xFFFFFF) << 32)
+                    let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
+                    let hi = *ptr.add(6) as u64;
+                    lo | (mid << 32) | (hi << 48)
                 }
                 _ => std::hint::unreachable_unchecked(),
             };
             vreinterpret_u8_u64(vdup_n_u64(val))
         }
     }
-
-    #[inline(always)]
-    fn can_overread_8(ptr: *const u8) -> bool {
-        (ptr as usize & 0xFFF) <= (4096 - 8)
-    }
 }
 
 impl BytesVec for NeonBytes {
     type Mask = NeonBytes;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(vdup_n_u8(0)) }
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         unsafe { Self(vdup_n_u8(value)) }
@@ -126,7 +119,7 @@ impl BytesVec for NeonBytes {
             let ptr = data.add(start);
             Self(match remaining {
                 8.. => vld1_u8(ptr),
-                1..=7 if Self::can_overread_8(ptr) => {
+                1..=7 if can_overread(ptr, 8) => {
                     let lo = vld1_u8(ptr);
                     // Build a per-byte mask: bytes 0..remaining = 0xFF, rest = 0x00.
                     let mask_bytes: [u8; 8] = [
@@ -354,20 +347,11 @@ impl NeonU8Bytes {
             vcombine_u8(lo, hi)
         }
     }
-
-    #[inline(always)]
-    fn can_overread_16(ptr: *const u8) -> bool {
-        (ptr as usize & 0xFFF) <= (4096 - 16)
-    }
 }
 
 impl BytesVec for NeonU8Bytes {
     type Mask = NeonU8Bytes;
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(vdupq_n_u8(0)) }
-    }
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
         unsafe { Self(vdupq_n_u8(value)) }
@@ -395,7 +379,7 @@ impl BytesVec for NeonU8Bytes {
             let ptr = data.add(start);
             Self(match remaining {
                 16.. => vld1q_u8(ptr),
-                1..=15 if Self::can_overread_16(ptr) => {
+                1..=15 if can_overread(ptr, 16) => {
                     let loaded = vld1q_u8(ptr);
                     // Mask off bytes >= remaining.
                     let mask_bytes: [u8; 16] = [

@@ -12,8 +12,8 @@ use super::Backend;
 pub struct PrefilterAVX {
     inner: Prefilter<PrefilterAVXBackend>,
     needle_len: usize,
-    /// Padded to an even length so the exact-match override can compare two
-    /// needle bytes per loop without a tail branch.
+    /// padded with one extra pair so we can skip bounds checks and always
+    /// assume we have a simd pair available
     needle_simd: Vec<(__m256i, __m256i)>,
 }
 
@@ -27,9 +27,8 @@ impl Kernel for PrefilterAVX {
             .map(|&(c1, c2)| unsafe { (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)) })
             .collect::<Vec<_>>();
 
-        // Keep an even number of elements so the exact-match override can
-        // issue two needle probes per loop without a tail branch.
-        if needle_simd.len() & 1 != 0 {
+        needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
+        if needle_simd.len() % 2 != 0 {
             needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
         }
 
@@ -63,14 +62,13 @@ impl Kernel for PrefilterAVX {
             let (haystack_chunk, mut haystack_chunk_mask) =
                 unsafe { load_window::<PrefilterAVXBackend>(haystack, start, len) };
 
-            // TODO: for pure letter haystacks, we could instead OR the chunk
-            // with 0x20 and compare against lowercase needles. That was about
-            // 2% faster overall, but uses fewer compares instead of filling the
-            // AVX2 compare throughput the paired-probe path targets here.
+            // NOTE: for pure letter haystacks, we could instead OR the chunk
+            // with 0x20 and compare against lowercase needles. it's about 2%
+            // faster overall, so not worth the extra code
             loop {
-                // Probe two needle bytes together: each case-insensitive probe
-                // is two byte compares, so the pair fills AVX2 compare issue
-                // bandwidth on CPUs with four such ports.
+                // CPUs can do 4 cmpeqs per cycle, so we compare two needles
+                // at a time (each case-insensitive probe is two byte compares)
+                // to maximize throughput
                 let first_mask = unsafe {
                     _mm256_or_si256(
                         _mm256_cmpeq_epi8(needle_char.0, haystack_chunk),
@@ -86,10 +84,12 @@ impl Kernel for PrefilterAVX {
 
                 let first_mask =
                     unsafe { _mm256_movemask_epi8(first_mask) } as u32 & haystack_chunk_mask;
+                // no match, move to next chunk
                 if first_mask == 0 {
                     break;
                 }
 
+                // mask out any match indices <= the current match
                 let min_bit = first_mask.trailing_zeros() as usize;
                 haystack_chunk_mask &= !1u32 << min_bit;
 
@@ -98,6 +98,7 @@ impl Kernel for PrefilterAVX {
                     can_skip_chunks = false;
                 }
 
+                // this was the final needle byte, return the match
                 if needle_idx + 1 >= needle_len {
                     if start + PrefilterAVXBackend::LANES >= len {
                         return (
@@ -119,9 +120,13 @@ impl Kernel for PrefilterAVX {
                     return (true, match_start_pos, end_pos);
                 }
 
+                // second needle byte
                 let second_mask =
                     unsafe { _mm256_movemask_epi8(second_mask) } as u32 & haystack_chunk_mask;
                 if second_mask == 0 {
+                    needle_idx += 1;
+                    needle_char = second_needle_char;
+                    second_needle_char = self.needle_simd[needle_idx + 1];
                     break;
                 }
                 haystack_chunk_mask &= !1u32 << second_mask.trailing_zeros();

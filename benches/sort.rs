@@ -35,7 +35,7 @@ fn bench_with_scale(c: &mut Criterion, scale: usize, batch_size: BatchSize) {
         b.iter_batched(
             || i.clone(),
             |mut m| {
-                frizbee::sort::radix_sort_matches(&mut m);
+                frizbee::sort::radix_sort(&mut m);
                 m
             },
             batch_size,

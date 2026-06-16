@@ -90,12 +90,6 @@ pub trait BytesVec: Copy + core::fmt::Debug {
     /// The backend's mask type, produced by comparison operations.
     type Mask: MaskVec;
 
-    /// Zero in every lane.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn zero() -> Self;
-
     /// Broadcast `value` into every byte lane.
     ///
     /// # Safety
@@ -355,15 +349,433 @@ pub(crate) unsafe fn propagate_64_lane<B: Backend>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Scoring;
+    use crate::smith_waterman::simd::{Kernel, SmithWaterman, score_fits_in_u8};
+    use proptest::prelude::*;
 
-    // ----- BytesVec property tests ---------------------------------------
+    #[derive(Debug, Clone, Copy)]
+    struct TestScalarBytes<const LANES: usize>([u8; LANES]);
 
-    fn check_bytes_zero<B: Backend>() {
-        unsafe {
-            let z = B::Bytes::zero();
-            assert_eq!(BytesVec::to_lanes(z), vec![0u8; B::LANES]);
+    #[derive(Debug, Clone, Copy)]
+    struct TestScalarScoreU16<const LANES: usize>([u16; LANES]);
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestScalarScoreU8<const LANES: usize>([u8; LANES]);
+
+    #[derive(Debug, Clone)]
+    struct TestScalar16;
+
+    #[derive(Debug, Clone)]
+    struct TestScalar32;
+
+    #[derive(Debug, Clone)]
+    struct TestScalar32U8;
+
+    #[derive(Debug, Clone)]
+    struct TestScalar64U8;
+
+    impl<const LANES: usize> BytesVec for TestScalarBytes<LANES> {
+        type Mask = TestScalarBytes<LANES>;
+
+        #[inline(always)]
+        unsafe fn splat(value: u8) -> Self {
+            Self([value; LANES])
+        }
+
+        #[inline(always)]
+        unsafe fn eq(self, other: Self) -> Self::Mask {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = if self.0[idx] == other.0[idx] {
+                    u8::MAX
+                } else {
+                    0
+                };
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn gt(self, other: Self) -> Self::Mask {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = if self.0[idx] > other.0[idx] {
+                    u8::MAX
+                } else {
+                    0
+                };
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn lt(self, other: Self) -> Self::Mask {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = if self.0[idx] < other.0[idx] {
+                    u8::MAX
+                } else {
+                    0
+                };
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
+            let mut out = [0u8; LANES];
+            let take = len.saturating_sub(start).min(LANES);
+            for (idx, lane) in out.iter_mut().take(take).enumerate() {
+                *lane = unsafe { *data.add(start + idx) };
+            }
+            Self(out)
+        }
+
+        #[cfg(test)]
+        fn from_lanes(values: &[u8]) -> Self {
+            assert_eq!(values.len(), LANES);
+            let mut out = [0u8; LANES];
+            out.copy_from_slice(values);
+            Self(out)
+        }
+
+        #[cfg(test)]
+        fn to_lanes(self) -> Vec<u8> {
+            self.0.to_vec()
         }
     }
+
+    impl<const LANES: usize> MaskVec for TestScalarBytes<LANES> {
+        #[inline(always)]
+        unsafe fn zero() -> Self {
+            Self([0; LANES])
+        }
+
+        #[inline(always)]
+        unsafe fn and(self, other: Self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx] & other.0[idx];
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn or(self, other: Self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx] | other.0[idx];
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn not(self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = !self.0[idx];
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
+            let mut out = [0u8; LANES];
+            out[0] = prev.0[LANES - 1];
+            out[1..LANES].copy_from_slice(&self.0[..(LANES - 1)]);
+            Self(out)
+        }
+
+        #[cfg(test)]
+        fn from_lanes(values: &[bool]) -> Self {
+            assert_eq!(values.len(), LANES);
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = if values[idx] { u8::MAX } else { 0 };
+            }
+            Self(out)
+        }
+
+        #[cfg(test)]
+        fn to_lanes(self) -> Vec<bool> {
+            self.0.iter().map(|&lane| lane != 0).collect()
+        }
+    }
+
+    impl<const LANES: usize> ScoreVec for TestScalarScoreU16<LANES> {
+        #[inline(always)]
+        unsafe fn zero() -> Self {
+            Self([0; LANES])
+        }
+
+        #[inline(always)]
+        unsafe fn splat(value: u16) -> Self {
+            Self([value; LANES])
+        }
+
+        #[inline(always)]
+        unsafe fn first_lane(value: u16) -> Self {
+            let mut out = [0u16; LANES];
+            out[0] = value;
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn max(self, other: Self) -> Self {
+            let mut out = [0u16; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx].max(other.0[idx]);
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn horizontal_max(self) -> u16 {
+            *self.0.iter().max().unwrap()
+        }
+
+        #[inline(always)]
+        unsafe fn add(self, other: Self) -> Self {
+            let mut out = [0u16; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx].wrapping_add(other.0[idx]);
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn subs(self, other: Self) -> Self {
+            let mut out = [0u16; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx].saturating_sub(other.0[idx]);
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn and(self, other: Self) -> Self {
+            let mut out = [0u16; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx] & other.0[idx];
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
+            let shift = L as usize;
+            debug_assert!(shift <= LANES);
+            let mut out = [0u16; LANES];
+            for idx in 0..shift {
+                out[idx] = prev.0[LANES - shift + idx];
+            }
+            out[shift..LANES].copy_from_slice(&self.0[..(LANES - shift)]);
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn find_lane(self, search: u16) -> usize {
+            for (idx, &lane) in self.0.iter().enumerate() {
+                if lane == search {
+                    return idx;
+                }
+            }
+            LANES
+        }
+
+        #[cfg(test)]
+        fn from_lanes(values: &[u16]) -> Self {
+            assert_eq!(values.len(), LANES);
+            let mut out = [0u16; LANES];
+            out.copy_from_slice(values);
+            Self(out)
+        }
+
+        #[cfg(test)]
+        fn to_lanes(self) -> Vec<u16> {
+            self.0.to_vec()
+        }
+    }
+
+    impl<const LANES: usize> ScoreVec for TestScalarScoreU8<LANES> {
+        #[inline(always)]
+        unsafe fn zero() -> Self {
+            Self([0; LANES])
+        }
+
+        #[inline(always)]
+        unsafe fn splat(value: u16) -> Self {
+            Self([value as u8; LANES])
+        }
+
+        #[inline(always)]
+        unsafe fn first_lane(value: u16) -> Self {
+            let mut out = [0u8; LANES];
+            out[0] = value as u8;
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn max(self, other: Self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx].max(other.0[idx]);
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn horizontal_max(self) -> u16 {
+            *self.0.iter().max().unwrap() as u16
+        }
+
+        #[inline(always)]
+        unsafe fn add(self, other: Self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx].wrapping_add(other.0[idx]);
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn subs(self, other: Self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx].saturating_sub(other.0[idx]);
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn and(self, other: Self) -> Self {
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = self.0[idx] & other.0[idx];
+            }
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
+            let shift = L as usize;
+            debug_assert!(shift <= LANES);
+            let mut out = [0u8; LANES];
+            for idx in 0..shift {
+                out[idx] = prev.0[LANES - shift + idx];
+            }
+            out[shift..LANES].copy_from_slice(&self.0[..(LANES - shift)]);
+            Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn find_lane(self, search: u16) -> usize {
+            let search = search as u8;
+            for (idx, &lane) in self.0.iter().enumerate() {
+                if lane == search {
+                    return idx;
+                }
+            }
+            LANES
+        }
+
+        #[cfg(test)]
+        fn from_lanes(values: &[u16]) -> Self {
+            assert_eq!(values.len(), LANES);
+            let mut out = [0u8; LANES];
+            for (idx, lane) in out.iter_mut().enumerate() {
+                *lane = values[idx] as u8;
+            }
+            Self(out)
+        }
+
+        #[cfg(test)]
+        fn to_lanes(self) -> Vec<u16> {
+            self.0.iter().map(|&lane| lane as u16).collect()
+        }
+    }
+
+    macro_rules! test_scalar_backend {
+        ($backend:ty, $lanes:literal, $lane_bytes:literal, $score:ty, $propagate:ident) => {
+            impl Backend for $backend {
+                const LANES: usize = $lanes;
+                const LANE_BYTES: usize = $lane_bytes;
+                type Bytes = TestScalarBytes<$lanes>;
+                type Mask = TestScalarBytes<$lanes>;
+                type Score = $score;
+
+                fn is_available() -> bool {
+                    true
+                }
+
+                #[inline(always)]
+                unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+                    let mut out = [0u16; $lanes];
+                    let full_mask = if $lane_bytes == 1 {
+                        u8::MAX as u16
+                    } else {
+                        u16::MAX
+                    };
+                    for (idx, lane) in out.iter_mut().enumerate() {
+                        *lane = if m.0[idx] != 0 { full_mask } else { 0 };
+                    }
+                    Self::Score::from_lanes(&out)
+                }
+
+                #[inline(always)]
+                unsafe fn propagate_horizontal_gaps(
+                    row: Self::Score,
+                    adjacent_row: Self::Score,
+                    match_mask: Self::Score,
+                    adjacent_match_mask: Self::Score,
+                    gap_open_penalty: Self::Score,
+                    gap_extend_penalty: Self::Score,
+                ) -> Self::Score {
+                    unsafe {
+                        super::$propagate::<Self>(
+                            row,
+                            adjacent_row,
+                            match_mask,
+                            adjacent_match_mask,
+                            gap_open_penalty,
+                            gap_extend_penalty,
+                        )
+                    }
+                }
+            }
+        };
+    }
+
+    test_scalar_backend!(
+        TestScalar16,
+        16,
+        2,
+        TestScalarScoreU16<16>,
+        propagate_16_lane
+    );
+    test_scalar_backend!(
+        TestScalar32,
+        32,
+        2,
+        TestScalarScoreU16<32>,
+        propagate_32_lane
+    );
+    test_scalar_backend!(
+        TestScalar32U8,
+        32,
+        1,
+        TestScalarScoreU8<32>,
+        propagate_32_lane
+    );
+    test_scalar_backend!(
+        TestScalar64U8,
+        64,
+        1,
+        TestScalarScoreU8<64>,
+        propagate_64_lane
+    );
+
+    // ----- BytesVec property tests ---------------------------------------
 
     fn check_bytes_splat<B: Backend>() {
         unsafe {
@@ -594,10 +1006,6 @@ mod tests {
                 use super::*;
 
                 #[test]
-                fn bytes_zero() {
-                    check_bytes_zero::<$backend>();
-                }
-                #[test]
                 fn bytes_splat() {
                     check_bytes_splat::<$backend>();
                 }
@@ -684,13 +1092,6 @@ mod tests {
                     !<$backend>::is_available()
                 }
 
-                #[test]
-                fn bytes_zero() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_bytes_zero::<$backend>();
-                }
                 #[test]
                 fn bytes_splat() {
                     if skip_if_unavailable() {
@@ -827,4 +1228,396 @@ mod tests {
     backend_tests!(neon, super::BackendNEON);
     #[cfg(target_arch = "aarch64")]
     backend_tests!(neon_u8, super::BackendNEONU8);
+
+    // ---------------------------------------------------------------
+    // Cross-backend parity: every available backend should produce the same
+    // scores and the same alignment-path indices as the runtime-selected
+    // backend. This covers u8 and u16 paths on each architecture.
+    // ---------------------------------------------------------------
+
+    fn cases() -> Vec<(&'static str, &'static str)> {
+        vec![
+            // short
+            ("a", "abc"),
+            ("abc", "abc"),
+            ("foo", "fooBar"),
+            // crossing 8-byte chunk boundary (SSE u16 LANES = 8)
+            ("foo", "012345foo"),
+            ("foo", "01234567foo"),
+            ("foo", "0123456789foo"),
+            // crossing 16-byte boundary (AVX u16, SSE u8 LANES = 16)
+            ("foo", "0123456789012345foo"),
+            // crossing 32-byte boundary (AVX u8 LANES = 32)
+            ("foo", "0123456789012345678901234567foo"),
+            // ranges that cross multiple chunks for all widths
+            ("test", "Utooooeoooosoooot"),
+            ("test", "Utooooooeoooooosoooooot"),
+            // typos
+            ("foo", "Ufooo"),
+            ("foo", "Ufo"),
+            // delimiter / capitalization
+            ("hw", "hello_world"),
+            ("fBr", "fooBar"),
+            ("D", "FOR_DIST"),
+            // long needles (some short enough for u8, some not)
+            ("needle", "____________needle____________"),
+            ("abcdefghij", "abcdefghij"),
+            ("abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
+        ]
+    }
+
+    fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
+        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
+        matcher.match_haystack(haystack.as_bytes(), None).unwrap()
+    }
+
+    fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
+        matcher
+            .match_haystack_indices(haystack.as_bytes(), 0, None)
+            .map(|(_, indices)| indices)
+    }
+
+    fn assert_score_backend<B: Backend>(label: &str, needle: &str, haystack: &str, want: u16) {
+        if B::is_available() {
+            let got = score_with::<B>(needle, haystack);
+            assert_eq!(
+                got, want,
+                "{label} score mismatch for needle={needle:?} haystack={haystack:?}"
+            );
+        }
+    }
+
+    fn assert_indices_backend<B: Backend>(
+        label: &str,
+        needle: &str,
+        haystack: &str,
+        want: Option<Vec<usize>>,
+    ) {
+        if B::is_available() {
+            let got = indices_with::<B>(needle, haystack);
+            assert_eq!(
+                got, want,
+                "{label} indices mismatch for needle={needle:?} haystack={haystack:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cross_backend_parity_score() {
+        for (needle, haystack) in cases() {
+            let want = score_with::<BackendScalar8>(needle, haystack);
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_score_backend::<BackendSSE>("SSE-u16", needle, haystack, want);
+                assert_score_backend::<BackendAVX512>("AVX-512-u16", needle, haystack, want);
+                assert_score_backend::<BackendAVX>("AVX-u16", needle, haystack, want);
+
+                if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                    assert_score_backend::<BackendSSEU8>("SSE-u8", needle, haystack, want);
+                    assert_score_backend::<BackendAVXU8>("AVX-u8", needle, haystack, want);
+                    assert_score_backend::<BackendAVX512U8>("AVX-512-u8", needle, haystack, want);
+                }
+            }
+
+            assert_score_backend::<BackendScalar8>("Scalar-u16", needle, haystack, want);
+
+            if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                assert_score_backend::<BackendScalar16U8>("Scalar-u8", needle, haystack, want);
+            }
+        }
+    }
+
+    #[test]
+    fn cross_backend_parity_indices() {
+        for (needle, haystack) in cases() {
+            let want = indices_with::<BackendScalar8>(needle, haystack);
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_indices_backend::<BackendSSE>("SSE-u16", needle, haystack, want.clone());
+                assert_indices_backend::<BackendAVX512>(
+                    "AVX-512-u16",
+                    needle,
+                    haystack,
+                    want.clone(),
+                );
+                assert_indices_backend::<BackendAVX>("AVX-u16", needle, haystack, want.clone());
+
+                if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                    assert_indices_backend::<BackendSSEU8>(
+                        "SSE-u8",
+                        needle,
+                        haystack,
+                        want.clone(),
+                    );
+                    assert_indices_backend::<BackendAVXU8>(
+                        "AVX-u8",
+                        needle,
+                        haystack,
+                        want.clone(),
+                    );
+                    assert_indices_backend::<BackendAVX512U8>(
+                        "AVX-512-u8",
+                        needle,
+                        haystack,
+                        want.clone(),
+                    );
+                }
+            }
+
+            assert_indices_backend::<BackendScalar8>("Scalar-u16", needle, haystack, want.clone());
+
+            if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                assert_indices_backend::<BackendScalar16U8>("Scalar-u8", needle, haystack, want);
+            }
+        }
+    }
+
+    fn ascii_byte() -> BoxedStrategy<u8> {
+        prop_oneof![
+            b'a'..=b'z',
+            b'A'..=b'Z',
+            b'0'..=b'9',
+            prop::sample::select(b" /.,_-:".to_vec()),
+        ]
+        .boxed()
+    }
+
+    fn byte_vec(max_len: usize) -> BoxedStrategy<Vec<u8>> {
+        let boundary_lengths = [0usize, 1, 7, 8, 15, 16, 31, 32, 63, 64, 511, 512, 513]
+            .into_iter()
+            .filter(move |len| *len <= max_len)
+            .collect::<Vec<_>>();
+        let regular = prop::collection::vec(ascii_byte(), 0..=max_len).boxed();
+        let boundary = prop::sample::select(boundary_lengths)
+            .prop_flat_map(|len| prop::collection::vec(ascii_byte(), len))
+            .boxed();
+
+        prop_oneof![4 => regular, 1 => boundary].boxed()
+    }
+
+    fn score_bytes_with<B: Backend>(needle: &[u8], haystack: &[u8], case_sensitive: bool) -> u16 {
+        let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
+        matcher.score_haystack(haystack)
+    }
+
+    fn indices_bytes_with<B: Backend>(
+        needle: &[u8],
+        haystack: &[u8],
+        max_typos: Option<u16>,
+        case_sensitive: bool,
+    ) -> Option<(u16, Vec<usize>)> {
+        let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
+        matcher.match_haystack_indices(haystack, 0, max_typos)
+    }
+
+    fn prop_assert_backend<B: Backend>(
+        label: &str,
+        needle: &[u8],
+        haystack: &[u8],
+        max_typos: Option<u16>,
+        case_sensitive: bool,
+        want_score: u16,
+        want_indices_score: Option<u16>,
+    ) -> Result<(), TestCaseError> {
+        if B::is_available() {
+            prop_assert_eq!(
+                score_bytes_with::<B>(needle, haystack, case_sensitive),
+                want_score,
+                "{} score mismatch",
+                label
+            );
+            let indices = indices_bytes_with::<B>(needle, haystack, max_typos, case_sensitive);
+            prop_assert_eq!(
+                indices.as_ref().map(|(score, _)| *score),
+                want_indices_score,
+                "{} indexed score mismatch",
+                label
+            );
+            if let Some((_, indices)) = indices {
+                prop_assert_indices_valid(label, needle, haystack, &indices)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn prop_assert_backend_matches_reference<B: Backend, R: Backend>(
+        label: &str,
+        needle: &[u8],
+        haystack: &[u8],
+        max_typos: Option<u16>,
+        case_sensitive: bool,
+    ) -> Result<(), TestCaseError> {
+        if B::is_available() {
+            let want_score = score_bytes_with::<R>(needle, haystack, case_sensitive);
+            let want_indices_score =
+                indices_bytes_with::<R>(needle, haystack, max_typos, case_sensitive)
+                    .as_ref()
+                    .map(|(score, _)| *score);
+            prop_assert_backend::<B>(
+                label,
+                needle,
+                haystack,
+                max_typos,
+                case_sensitive,
+                want_score,
+                want_indices_score,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn prop_assert_indices_valid(
+        label: &str,
+        needle: &[u8],
+        haystack: &[u8],
+        indices: &[usize],
+    ) -> Result<(), TestCaseError> {
+        prop_assert!(
+            indices.windows(2).all(|window| window[0] > window[1]),
+            "{} indices are not in reverse order: {:?}",
+            label,
+            indices
+        );
+        prop_assert!(
+            indices.len() <= needle.len(),
+            "{} indices contain more positions than needle bytes: indices={:?} needle_len={}",
+            label,
+            indices,
+            needle.len()
+        );
+        for &index in indices {
+            prop_assert!(
+                index < haystack.len(),
+                "{} index {} is out of bounds for haystack_len={}",
+                label,
+                index,
+                haystack.len()
+            );
+        }
+        Ok(())
+    }
+
+    fn proptest_config(cases: u32, max_shrink_iters: u32) -> ProptestConfig {
+        let mut config = ProptestConfig {
+            cases,
+            max_shrink_iters,
+            ..ProptestConfig::default()
+        };
+        if cfg!(miri) {
+            config.cases = cases.min(4);
+            config.max_shrink_iters = max_shrink_iters.min(64);
+            config.failure_persistence = None;
+        }
+        config
+    }
+
+    fn proptest_bound(max: usize, miri_max: usize) -> usize {
+        if cfg!(miri) { max.min(miri_max) } else { max }
+    }
+
+    proptest! {
+        #![proptest_config(proptest_config(192, 2048))]
+
+        #[test]
+        fn randomized_cross_backend_parity(
+            needle in byte_vec(proptest_bound(96, 32)),
+            haystack in byte_vec(proptest_bound(768, 128)),
+            max_typos in prop_oneof![Just(None), (0u16..=16).prop_map(Some)],
+            case_sensitive in any::<bool>(),
+        ) {
+            prop_assume!(!needle.is_empty());
+            prop_assume!(!needle.contains(&0) && !haystack.contains(&0));
+
+            prop_assert_backend_matches_reference::<BackendScalar8, BackendScalar8>(
+                "scalar-u16",
+                &needle,
+                &haystack,
+                max_typos,
+                case_sensitive,
+            )?;
+
+            if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                prop_assert_backend_matches_reference::<BackendScalar16U8, BackendScalar16U8>(
+                    "scalar-u8",
+                    &needle,
+                    &haystack,
+                    max_typos,
+                    case_sensitive,
+                )?;
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                prop_assert_backend_matches_reference::<BackendSSE, BackendScalar8>(
+                    "SSE-u16",
+                    &needle,
+                    &haystack,
+                    max_typos,
+                    case_sensitive,
+                )?;
+                prop_assert_backend_matches_reference::<BackendAVX, TestScalar16>(
+                    "AVX-u16",
+                    &needle,
+                    &haystack,
+                    max_typos,
+                    case_sensitive,
+                )?;
+                prop_assert_backend_matches_reference::<BackendAVX512, TestScalar32>(
+                    "AVX-512-u16",
+                    &needle,
+                    &haystack,
+                    max_typos,
+                    case_sensitive,
+                )?;
+
+                if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                    prop_assert_backend_matches_reference::<BackendSSEU8, BackendScalar16U8>(
+                        "SSE-u8",
+                        &needle,
+                        &haystack,
+                        max_typos,
+                        case_sensitive,
+                    )?;
+                    prop_assert_backend_matches_reference::<BackendAVXU8, TestScalar32U8>(
+                        "AVX-u8",
+                        &needle,
+                        &haystack,
+                        max_typos,
+                        case_sensitive,
+                    )?;
+                    prop_assert_backend_matches_reference::<BackendAVX512U8, TestScalar64U8>(
+                        "AVX-512-u8",
+                        &needle,
+                        &haystack,
+                        max_typos,
+                        case_sensitive,
+                    )?;
+                }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                prop_assert_backend_matches_reference::<BackendNEON, BackendScalar8>(
+                    "NEON-u16",
+                    &needle,
+                    &haystack,
+                    max_typos,
+                    case_sensitive,
+                )?;
+
+                if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                    prop_assert_backend_matches_reference::<BackendNEONU8, BackendScalar16U8>(
+                        "NEON-u8",
+                        &needle,
+                        &haystack,
+                        max_typos,
+                        case_sensitive,
+                    )?;
+                }
+            }
+        }
+    }
 }

@@ -3,7 +3,7 @@ use crate::Match;
 /// Sorts a slice of [`Match`] values in-place by descending `score` using a
 /// stable radix sort. This assumes that the matches are already sorted by index.
 #[inline]
-pub fn radix_sort_matches(matches: &mut [Match]) {
+pub fn radix_sort(matches: &mut [Match]) {
     // pass 1
     let mut histogram = [0u32; 256];
     for m in matches.iter() {
@@ -56,7 +56,9 @@ mod test {
     #[test]
     fn test_sorted() {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
-        let mut matches = (0u32..1 << 24)
+        // Miri tests are too slow for a full sized test, bound to 4096
+        let count = if cfg!(miri) { 1 << 12 } else { 1 << 24 };
+        let mut matches = (0u32..count)
             .map(|index| Match {
                 score: rng.random::<u16>(),
                 index,
@@ -66,7 +68,7 @@ mod test {
             })
             .collect::<Vec<_>>();
 
-        radix_sort_matches(&mut matches);
+        radix_sort(&mut matches);
 
         assert!(matches.is_sorted());
     }
