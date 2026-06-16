@@ -4,15 +4,15 @@ use crate::prefilter::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct LaneState<M> {
+pub(crate) struct PathState<M> {
     pub needle_idx: usize,
-    pub chunk_mask: M,
+    pub needle_mask: M,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Prefilter<B: Backend> {
     needle: Vec<B::Needle>,
-    lanes: Vec<LaneState<B::Mask>>,
+    paths: Vec<PathState<B::Mask>>,
 }
 
 impl<B: Backend> Prefilter<B> {
@@ -26,7 +26,7 @@ impl<B: Backend> Prefilter<B> {
             .collect();
         Self {
             needle,
-            lanes: Vec::new(),
+            paths: Vec::new(),
         }
     }
 
@@ -106,88 +106,91 @@ impl<B: Backend> Prefilter<B> {
             return (false, 0, 0);
         }
 
-        let mut i0 = 0usize;
-        let mut i1 = 1usize;
+        let mut first_path_needle_idx = 0usize;
+        let mut second_path_needle_idx = 1usize;
         let mut match_start_pos = usize::MAX;
 
         for start in (0..len).step_by(B::LANES) {
+            // compare needle chars of both paths against the current chunk
             let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
-            let mut occ0 = unsafe { B::occ(chunk, self.needle_unchecked(i0)) };
-            let mut occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
+            let mut first_path_mask =
+                unsafe { B::occ(chunk, self.needle_unchecked(first_path_needle_idx)) };
+            let mut second_path_mask =
+                unsafe { B::occ(chunk, self.needle_unchecked(second_path_needle_idx)) };
 
-            if !occ0.or(occ1).and(chunk_mask).is_zero() {
-                let mut m0 = chunk_mask;
-                let mut m1 = chunk_mask;
-                let mut prev_idx = usize::MAX;
-                let mut occ_prev = B::Mask::zero();
+            let mut first_path_chunk_mask = chunk_mask;
+            let mut second_path_chunk_mask = chunk_mask;
 
-                loop {
-                    let mut advanced = false;
+            loop {
+                let mut advanced = false;
 
-                    let candidate_idx = i0 + 1;
-                    if candidate_idx > i1 {
-                        if candidate_idx == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 1) };
-                        }
-                        i1 = candidate_idx;
-                        m1 = m0;
-                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-                        advanced = true;
-                    } else if candidate_idx == i1 && m0 > m1 {
-                        m1 = m0;
-                        advanced = true;
+                let candidate_needle_idx = first_path_needle_idx + 1;
+                if candidate_needle_idx > second_path_needle_idx {
+                    // first path is on the second last char
+                    // and since this path allows a typo, we've matched
+                    if candidate_needle_idx == needle_len {
+                        return unsafe { self.found_with_typos(haystack, match_start_pos, 1) };
                     }
 
-                    let hit0 = occ0.and(m0);
-                    if !hit0.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit0) });
-                        m0 = unsafe { B::clear_through_lowest(m0, hit0) };
-                        i0 += 1;
-                        debug_assert!(i0 < needle_len);
-                        occ0 = if i0 == i1 {
-                            occ1
-                        } else if i0 == prev_idx {
-                            occ_prev
-                        } else {
-                            unsafe { B::occ(chunk, self.needle_unchecked(i0)) }
-                        };
-                        advanced = true;
-                    }
-
-                    let hit1 = occ1.and(m1);
-                    if !hit1.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit1) });
-                        m1 = unsafe { B::clear_through_lowest(m1, hit1) };
-                        prev_idx = i1;
-                        occ_prev = occ1;
-                        i1 += 1;
-                        if i1 == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 1) };
-                        }
-                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-                        advanced = true;
-                    }
-
-                    if !advanced {
-                        break;
-                    }
+                    // first path caught up to or passed the second path
+                    // skip the next needle char
+                    second_path_needle_idx = candidate_needle_idx;
+                    second_path_chunk_mask = first_path_chunk_mask;
+                    second_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(second_path_needle_idx)) };
+                } else if candidate_needle_idx == second_path_needle_idx
+                    && first_path_chunk_mask > second_path_chunk_mask
+                {
+                    second_path_chunk_mask = first_path_chunk_mask;
                 }
-            }
 
-            let next_start = start + B::LANES;
-            if next_start < len && needle_len - i1 > len - next_start {
-                break;
+                // match first path against current chunk
+                let first_path_matches = first_path_mask.and(first_path_chunk_mask);
+                if !first_path_matches.is_zero() {
+                    match_start_pos = match_start_pos
+                        .min(start + unsafe { B::first_hit_pos(first_path_matches) });
+
+                    first_path_needle_idx += 1;
+
+                    first_path_chunk_mask = unsafe {
+                        B::clear_through_lowest(first_path_chunk_mask, first_path_matches)
+                    };
+                    first_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(first_path_needle_idx)) };
+                    advanced = true;
+                }
+
+                // match second path against current chunk
+                let second_path_matches = second_path_mask.and(second_path_chunk_mask);
+                if !second_path_matches.is_zero() {
+                    match_start_pos = match_start_pos
+                        .min(start + unsafe { B::first_hit_pos(second_path_matches) });
+
+                    second_path_needle_idx += 1;
+                    if second_path_needle_idx >= needle_len {
+                        return unsafe { self.found_with_typos(haystack, match_start_pos, 1) };
+                    }
+
+                    second_path_chunk_mask = unsafe {
+                        B::clear_through_lowest(second_path_chunk_mask, second_path_matches)
+                    };
+                    second_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(second_path_needle_idx)) };
+                    advanced = true;
+                }
+
+                if !advanced {
+                    break;
+                }
             }
         }
 
-        let reported_start = if match_start_pos == usize::MAX {
+        let match_start_pos = if match_start_pos == usize::MAX {
             0
         } else {
             match_start_pos
         };
-        (false, reported_start, len)
+        (false, match_start_pos, len)
     }
 
     #[inline(always)]
@@ -201,108 +204,134 @@ impl<B: Backend> Prefilter<B> {
             return (false, 0, 0);
         }
 
-        let mut i0 = 0usize;
-        let mut i1 = 1usize;
-        let mut i2 = 2usize;
+        let mut first_path_needle_idx = 0usize;
+        let mut second_path_needle_idx = 1usize;
+        let mut third_path_needle_idx = 2usize;
         let mut match_start_pos = usize::MAX;
 
         for start in (0..len).step_by(B::LANES) {
+            // compare needle chars of all paths against the current chunk
             let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
-            let mut occ0 = unsafe { B::occ(chunk, self.needle_unchecked(i0)) };
-            let mut occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-            let mut occ2 = unsafe { B::occ(chunk, self.needle_unchecked(i2)) };
+            let mut first_path_mask =
+                unsafe { B::occ(chunk, self.needle_unchecked(first_path_needle_idx)) };
+            let mut second_path_mask =
+                unsafe { B::occ(chunk, self.needle_unchecked(second_path_needle_idx)) };
+            let mut third_path_mask =
+                unsafe { B::occ(chunk, self.needle_unchecked(third_path_needle_idx)) };
 
-            if !occ0.or(occ1).or(occ2).and(chunk_mask).is_zero() {
-                let mut m0 = chunk_mask;
-                let mut m1 = chunk_mask;
-                let mut m2 = chunk_mask;
+            let mut first_path_chunk_mask = chunk_mask;
+            let mut second_path_chunk_mask = chunk_mask;
+            let mut third_path_chunk_mask = chunk_mask;
 
-                loop {
-                    let mut advanced = false;
+            loop {
+                let mut advanced = false;
 
-                    let cand1 = i0 + 1;
-                    if cand1 > i1 {
-                        if cand1 == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
-                        }
-                        i1 = cand1;
-                        m1 = m0;
-                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-                        advanced = true;
-                    } else if cand1 == i1 && m0 > m1 {
-                        m1 = m0;
-                        advanced = true;
+                let second_path_candidate_needle_idx = first_path_needle_idx + 1;
+                if second_path_candidate_needle_idx > second_path_needle_idx {
+                    // first path is on the second last char
+                    // and since this path allows typos, we've matched
+                    if second_path_candidate_needle_idx == needle_len {
+                        return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
                     }
 
-                    let cand2 = i1 + 1;
-                    if cand2 > i2 {
-                        if cand2 == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
-                        }
-                        i2 = cand2;
-                        m2 = m1;
-                        occ2 = unsafe { B::occ(chunk, self.needle_unchecked(i2)) };
-                        advanced = true;
-                    } else if cand2 == i2 && m1 > m2 {
-                        m2 = m1;
-                        advanced = true;
-                    }
-
-                    let hit0 = occ0.and(m0);
-                    if !hit0.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit0) });
-                        m0 = unsafe { B::clear_through_lowest(m0, hit0) };
-                        i0 += 1;
-                        debug_assert!(i0 < needle_len);
-                        occ0 = unsafe { B::occ(chunk, self.needle_unchecked(i0)) };
-                        advanced = true;
-                    }
-
-                    let hit1 = occ1.and(m1);
-                    if !hit1.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit1) });
-                        m1 = unsafe { B::clear_through_lowest(m1, hit1) };
-                        i1 += 1;
-                        if i1 == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
-                        }
-                        occ1 = unsafe { B::occ(chunk, self.needle_unchecked(i1)) };
-                        advanced = true;
-                    }
-
-                    let hit2 = occ2.and(m2);
-                    if !hit2.is_zero() {
-                        match_start_pos =
-                            match_start_pos.min(start + unsafe { B::first_hit_pos(hit2) });
-                        m2 = unsafe { B::clear_through_lowest(m2, hit2) };
-                        i2 += 1;
-                        if i2 == needle_len {
-                            return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
-                        }
-                        occ2 = unsafe { B::occ(chunk, self.needle_unchecked(i2)) };
-                        advanced = true;
-                    }
-
-                    if !advanced {
-                        break;
-                    }
+                    // first path caught up to or passed the second path
+                    // skip the next needle char
+                    second_path_needle_idx = second_path_candidate_needle_idx;
+                    second_path_chunk_mask = first_path_chunk_mask;
+                    second_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(second_path_needle_idx)) };
+                } else if second_path_candidate_needle_idx == second_path_needle_idx
+                    && first_path_chunk_mask > second_path_chunk_mask
+                {
+                    second_path_chunk_mask = first_path_chunk_mask;
                 }
-            }
 
-            let next_start = start + B::LANES;
-            if next_start < len && needle_len - i2 > len - next_start {
-                break;
+                let third_path_candidate_needle_idx = second_path_needle_idx + 1;
+                if third_path_candidate_needle_idx > third_path_needle_idx {
+                    // second path is on the second last char
+                    // and since this path allows typos, we've matched
+                    if third_path_candidate_needle_idx == needle_len {
+                        return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
+                    }
+
+                    // second path caught up to or passed the third path
+                    // skip the next needle char
+                    third_path_needle_idx = third_path_candidate_needle_idx;
+                    third_path_chunk_mask = second_path_chunk_mask;
+                    third_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(third_path_needle_idx)) };
+                } else if third_path_candidate_needle_idx == third_path_needle_idx
+                    && second_path_chunk_mask > third_path_chunk_mask
+                {
+                    third_path_chunk_mask = second_path_chunk_mask;
+                }
+
+                // match first path against current chunk
+                let first_path_matches = first_path_mask.and(first_path_chunk_mask);
+                if !first_path_matches.is_zero() {
+                    match_start_pos = match_start_pos
+                        .min(start + unsafe { B::first_hit_pos(first_path_matches) });
+
+                    first_path_needle_idx += 1;
+
+                    first_path_chunk_mask = unsafe {
+                        B::clear_through_lowest(first_path_chunk_mask, first_path_matches)
+                    };
+                    first_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(first_path_needle_idx)) };
+                    advanced = true;
+                }
+
+                // match second path against current chunk
+                let second_path_matches = second_path_mask.and(second_path_chunk_mask);
+                if !second_path_matches.is_zero() {
+                    match_start_pos = match_start_pos
+                        .min(start + unsafe { B::first_hit_pos(second_path_matches) });
+
+                    second_path_needle_idx += 1;
+                    if second_path_needle_idx >= needle_len {
+                        return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
+                    }
+
+                    second_path_chunk_mask = unsafe {
+                        B::clear_through_lowest(second_path_chunk_mask, second_path_matches)
+                    };
+                    second_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(second_path_needle_idx)) };
+                    advanced = true;
+                }
+
+                // match third path against current chunk
+                let third_path_matches = third_path_mask.and(third_path_chunk_mask);
+                if !third_path_matches.is_zero() {
+                    match_start_pos = match_start_pos
+                        .min(start + unsafe { B::first_hit_pos(third_path_matches) });
+
+                    third_path_needle_idx += 1;
+                    if third_path_needle_idx >= needle_len {
+                        return unsafe { self.found_with_typos(haystack, match_start_pos, 2) };
+                    }
+
+                    third_path_chunk_mask = unsafe {
+                        B::clear_through_lowest(third_path_chunk_mask, third_path_matches)
+                    };
+                    third_path_mask =
+                        unsafe { B::occ(chunk, self.needle_unchecked(third_path_needle_idx)) };
+                    advanced = true;
+                }
+
+                if !advanced {
+                    break;
+                }
             }
         }
 
-        let reported_start = if match_start_pos == usize::MAX {
+        let match_start_pos = if match_start_pos == usize::MAX {
             0
         } else {
             match_start_pos
         };
-        (false, reported_start, len)
+        (false, match_start_pos, len)
     }
 
     #[inline(always)]
@@ -320,103 +349,90 @@ impl<B: Backend> Prefilter<B> {
             return (false, 0, 0);
         }
 
-        let lane_count = max_typos + 1;
-        self.lanes.resize(
-            lane_count,
-            LaneState {
+        let path_count = max_typos + 1;
+        self.paths.resize(
+            path_count,
+            PathState {
                 needle_idx: 0,
-                chunk_mask: B::Mask::zero(),
+                needle_mask: B::Mask::zero(),
             },
         );
-        for lane in &mut self.lanes {
-            lane.needle_idx = 0;
-            lane.chunk_mask = B::Mask::zero();
+        for path in &mut self.paths {
+            path.needle_idx = 0;
+            path.needle_mask = B::Mask::zero();
         }
 
-        let lanes = self.lanes.as_mut_ptr();
+        let paths = self.paths.as_mut_ptr();
         let needle = self.needle.as_slice();
         let mut match_start_pos = usize::MAX;
 
         for start in (0..len).step_by(B::LANES) {
-            let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
-            for typos in 0..lane_count {
+            let (chunk, mut chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
+            for path_idx in 0..path_count {
                 unsafe {
-                    (*lanes.add(typos)).chunk_mask = chunk_mask;
+                    let path = paths.add(path_idx);
+                    (*path).needle_mask = B::occ(chunk, *needle.get_unchecked((*path).needle_idx));
                 }
             }
 
             loop {
-                let mut advanced = false;
-
-                for typos in 1..lane_count {
+                for path_idx in 1..path_count {
                     unsafe {
-                        let prev = *lanes.add(typos - 1);
-                        let lane = lanes.add(typos);
-                        let candidate_idx = prev.needle_idx + 1;
-                        if candidate_idx > (*lane).needle_idx
-                            || (candidate_idx == (*lane).needle_idx
-                                && prev.chunk_mask > (*lane).chunk_mask)
-                        {
-                            (*lane).needle_idx = candidate_idx;
-                            (*lane).chunk_mask = prev.chunk_mask;
-                            advanced = true;
-                            if candidate_idx == needle_len {
+                        let prev = *paths.add(path_idx - 1);
+                        let path = paths.add(path_idx);
+                        let candidate_needle_idx = prev.needle_idx + 1;
+                        if candidate_needle_idx > (*path).needle_idx {
+                            if candidate_needle_idx == needle_len {
                                 return self.found_with_typos(haystack, match_start_pos, max_typos);
                             }
+                            (*path).needle_idx = candidate_needle_idx;
+                            (*path).needle_mask =
+                                B::occ(chunk, *needle.get_unchecked(candidate_needle_idx));
                         }
                     }
                 }
 
-                for typos in 0..lane_count {
+                let mut match_mask = B::Mask::zero();
+                for path_idx in 0..path_count {
                     unsafe {
-                        let lane = lanes.add(typos);
-                        let mask = B::occ(chunk, *needle.get_unchecked((*lane).needle_idx))
-                            .and((*lane).chunk_mask);
-                        if mask.is_zero() {
+                        match_mask = match_mask.or((*paths.add(path_idx)).needle_mask);
+                    }
+                }
+                let matches = match_mask.and(chunk_mask);
+                if matches.is_zero() {
+                    break;
+                }
+
+                let hit_pos = unsafe { B::first_hit_pos(matches) };
+                let hit = matches.and(B::Mask::first_n(hit_pos + 1));
+                match_start_pos = match_start_pos.min(start + hit_pos);
+
+                for path_idx in 0..path_count {
+                    unsafe {
+                        let path = paths.add(path_idx);
+                        if (*path).needle_mask.and(hit).is_zero() {
                             continue;
                         }
 
-                        (*lane).chunk_mask = B::clear_through_lowest((*lane).chunk_mask, mask);
-                        (*lane).needle_idx += 1;
-                        advanced = true;
-                        match_start_pos = match_start_pos.min(start + B::first_hit_pos(mask));
-                        if (*lane).needle_idx == needle_len {
+                        (*path).needle_idx += 1;
+                        if (*path).needle_idx == needle_len {
                             return self.found_with_typos(haystack, match_start_pos, max_typos);
                         }
+                        (*path).needle_mask =
+                            B::occ(chunk, *needle.get_unchecked((*path).needle_idx));
                     }
                 }
 
-                if !advanced {
-                    break;
-                }
-            }
-
-            let next_start = start + B::LANES;
-            if next_start < len {
-                let remaining_haystack = len - next_start;
-                let mut any_lane_viable = false;
-                for typos in 0..lane_count {
-                    unsafe {
-                        let unaccounted_chars = needle_len - (*lanes.add(typos)).needle_idx;
-                        let deletions_left = max_typos - typos;
-                        if unaccounted_chars <= deletions_left + remaining_haystack {
-                            any_lane_viable = true;
-                            break;
-                        }
-                    }
-                }
-                if !any_lane_viable {
-                    break;
-                }
+                chunk_mask = unsafe { B::clear_through_lowest(chunk_mask, hit) };
             }
         }
 
-        let reported_start = if match_start_pos == usize::MAX {
+        let match_start_pos = if match_start_pos == usize::MAX {
             0
         } else {
             match_start_pos
         };
-        (false, reported_start, len)
+        (false, match_start_pos, len)
     }
 
     #[inline(always)]
