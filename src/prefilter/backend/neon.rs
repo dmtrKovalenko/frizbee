@@ -45,7 +45,7 @@ impl Backend for PrefilterNEONBackend {
 #[inline(always)]
 unsafe fn movemask_u8(mask: uint8x16_t) -> u16 {
     unsafe {
-        let bits = vandq_u8(vshrq_n_u8::<7>(mask), vld1q_u8(BIT_WEIGHTS.as_ptr()));
+        let bits = vandq_u8(mask, vld1q_u8(BIT_WEIGHTS.as_ptr()));
         let lo = vaddv_u8(vget_low_u8(bits)) as u16;
         let hi = vaddv_u8(vget_high_u8(bits)) as u16;
         lo | (hi << 8)
