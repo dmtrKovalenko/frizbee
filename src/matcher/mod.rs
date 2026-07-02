@@ -12,8 +12,8 @@ pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 
 #[derive(Debug, Clone)]
 pub struct Matcher {
-    pub needle: String,
-    pub config: Config,
+    needle: String,
+    config: Config,
     backend: MatcherBackend,
     needs_unicode: bool,
 }
@@ -73,6 +73,14 @@ impl Matcher {
             config: config.clone(),
             needs_unicode: config.unicode.respects_unicode_for(needle),
         }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn needle(&self) -> &str {
+        &self.needle
     }
 
     /// Updates the config and rebuilds the internal matcher backend.

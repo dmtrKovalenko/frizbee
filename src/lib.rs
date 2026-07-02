@@ -105,7 +105,7 @@ pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
 /// matched indices in the UI.
 ///
 /// This API should not be called with one item at a time as it performs dynamic dispatch to
-/// the underlying backend. Instead, consider using the [`match_iter_indices`] or
+/// the underlying backend. Instead, consider using the [`Matcher::match_iter_indices`] or
 /// [`iter::FuzzyMatchExt`] API.
 pub fn match_list_indices<S1: AsRef<str>, S2: AsRef<str>>(
     needle: S1,

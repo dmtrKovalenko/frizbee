@@ -13,6 +13,10 @@ pub fn match_greedy(
     case_sensitive: bool,
 ) -> Option<(u16, Vec<usize>)> {
     let needle = case_needle(needle, case_sensitive);
+    if needle.len() > haystack.len() {
+        return None;
+    }
+
     let mut score = 0;
     let mut indices = vec![];
     let mut haystack_idx = 0;
@@ -117,6 +121,7 @@ mod tests {
     fn test_no_match() {
         assert_eq!(get_score("a", "b"), 0);
         assert_eq!(get_score("ab", "ba"), 0);
+        assert_eq!(get_score("abc", "ab"), 0);
     }
 
     #[test]

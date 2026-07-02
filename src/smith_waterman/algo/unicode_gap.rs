@@ -1,7 +1,7 @@
 //! With the default gap propagation, `hw` matched against `h😀w` will receive a penalty
-//! to the score of `gap_open_penality + gap_extend_penalty * 4` due to the emoji taking
+//! to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking
 //! up 4 bytes. If the haystack was instead `hew`, the penalty would be
-//! `gap_open_penality + gap_extend_penalty`. As a result, we need to be aware of the unicode
+//! `gap_open_penalty + gap_extend_penalty`. As a result, we need to be aware of the unicode
 //! boundaries and only apply the gap penalty when reaching the end of a multi-byte
 //! codepoint.
 //!

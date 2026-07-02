@@ -20,13 +20,13 @@ impl BackendCase {
     fn from_bytes(input: &[u8]) -> Self {
         let mut cursor = ByteCursor::new(input);
         // Bias lengths toward SIMD chunk boundaries (8/16/32/64) and the
-        // greedy-fallback boundary (512), where lane-boundary bugs hide
+        // greedy-fallback boundary (1024), where lane-boundary bugs hide
         let needle_len = cursor
             .len(test_bound(96, 32), &[1, 7, 8, 15, 16, 31, 32, 63, 64])
             .max(1);
         let haystack_len = cursor.len(
             test_bound(768, 128),
-            &[0, 1, 7, 8, 15, 16, 31, 32, 63, 64, 511, 512, 513],
+            &[0, 1, 7, 8, 15, 16, 31, 32, 63, 64, 1023, 1024, 1025],
         );
         let max_typos = match cursor.next() % 5 {
             0 => None,
@@ -49,7 +49,7 @@ fn miri_inputs() -> &'static [&'static [u8]] {
         b"",
         b"abcABC012 /.,_-:",
         b"lane-boundary-8-16-32-64",
-        b"greedy-511-512-513",
+        b"greedy-1023-1024-1025",
     ]
 }
 

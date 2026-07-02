@@ -15,7 +15,7 @@ pub(crate) mod ascii_gap;
 mod unicode;
 pub(crate) mod unicode_gap;
 
-pub(crate) const MAX_HAYSTACK_LEN: usize = 512;
+pub(crate) const MAX_HAYSTACK_LEN: usize = 1024;
 
 impl<B: Backend> Kernel for SmithWaterman<B> {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {

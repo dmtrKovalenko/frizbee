@@ -218,7 +218,7 @@ impl<B: Backend> Prefilter<B> {
             // could have matched. this can result in a false positive, but that's fine for
             // this stage since this just controls bounds, and bounds being too large hurt
             // performance, not correctness.
-            let mut mask = unsafe { B::eq(chunk, last_bytes.0).and(B::eq(chunk, last_bytes.1)) }
+            let mut mask = unsafe { B::eq(chunk, last_bytes.0).or(B::eq(chunk, last_bytes.1)) }
                 .and(chunk_mask);
 
             if !mask.is_zero() && char_len > 1 {

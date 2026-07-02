@@ -53,7 +53,7 @@ Nucleo and FZF use a prefiltering step that removes any haystacks that do not in
 
 Nucleo uses [`memchr`](https://docs.rs/memchr/2.7.6/memchr/) to ensure that the needle is wholly contained in the haystack, in the correct order. For case insensitive matching, it checks the lowercase and uppercase needle chars separately. For each character, it loads the haystack from the previously matched position and performs a sequential search via SIMD. This results in many unnecessary loads (for a needle of 6 chars with a haystack of length 32 with 16 byte wide SIMD, this would lead to 6 + 2 - 1 = 7 loads).
 
-Frizbee improves upon this by loading the haystack chunk by chunk and masking out the already-matched prefix for each needle char. This results in ahaystack of length 32 with 16 byte wide SIMD only performing 2 loads. Frizbee also uses prefiltering to find the prefix/suffix of the haystack of characters that are impossible to match (not in the needle), similar to FZF.
+Frizbee improves upon this by loading the haystack chunk by chunk and masking out the already-matched prefix for each needle char. This results in a haystack of length 32 with 16 byte wide SIMD only performing 2 loads. Frizbee also uses prefiltering to find the prefix/suffix of the haystack of characters that are impossible to match (not in the needle), similar to FZF.
 
 ```
 needle: "foo"
@@ -120,7 +120,7 @@ f  [0   0   0   0]   [0   0   0   0]   [0   0   16  11]  [10  9   8   7]   [6   
 o  [0   16  11  10]  [9   8   16  11]  [10  9   8   32]  [27  26  25  24]  [23  22  21  20]
 o  [0   16  11  10]  [9   8   24  19]  [18  17  16  24]  [48  43  42  41]  [40  39  38  37]
 
-// for the SIMD register at row 3, col 2, before applying gap propgation, we would start with
+// for the SIMD register at row 3, col 2, before applying gap propagation, we would start with
 
 needle:      [o   o   o   o]
 haystack:    [/   l   o   n]
@@ -206,9 +206,9 @@ The matrix receives a row per needle UTF-8 codepoint, rather than per needle byt
 
 Frizbee will not perform any [unicode normalization](https://docs.rs/unicode-normalization/latest/unicode_normalization/) before matching. You should apply this yourself if you need it.
 
-With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penality + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penality + gap_extend_penalty`. This should typically be a non-issue, but you can force the slower unicode path with `UnicodeMatching::Respect` on ASCII needles, if necessary.
+With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penality + gap_extend_penalty`. This should typically be a non-issue, but you can force the slower unicode path with `UnicodeMatching::Respect` on ASCII needles, if necessary.
 
-For case-insenstive matching, the case flipped version will be skipped if it's a different byte length or has multiple codepoints (such as the German `ß` -> `SS`).
+For case-insensitive matching, the case flipped version will be skipped if it's a different byte length or has multiple codepoints (such as the German `ß` -> `SS`).
 
 Unlike FZF, Frizbee will not match `a` against `á`.
 

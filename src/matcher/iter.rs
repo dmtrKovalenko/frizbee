@@ -45,8 +45,8 @@ pub trait FuzzyMatchExt: Iterator + Sized {
     /// haystack.
     ///
     /// This API has not been optimized for performance, and should only be used on small lists or
-    /// after matching a list of haystacks with [`fuzzy_match`]. Useful for displaying matched
-    /// indices in the UI.
+    /// after matching a list of haystacks with [`FuzzyMatchExt::fuzzy_match`]. Useful for displaying
+    /// matched indices in the UI.
     ///
     /// ```
     /// use frizbee::{Config, iter::FuzzyMatchExt};

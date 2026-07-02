@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn long_input_boundary_indices_stay_reverse_ordered() {
-        for len in [511usize, 512, 513] {
+        for len in [1023, 1024, 1025] {
             let haystack = format!("{}abc", "x".repeat(len - 3));
             assert_eq!(get_score("abc", &haystack), 3 * CHAR_SCORE, "len={len}");
             assert_eq!(
