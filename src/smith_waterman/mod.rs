@@ -448,6 +448,19 @@ mod tests {
     }
 
     #[test]
+    fn unicode_indices_do_not_split_multibyte_scalars_in_traceback() {
+        // ensures that when we do traceback, we match all indices of multi-byte
+        // unicode chars when they match
+        assert_eq!(get_unicode_indices("😀.a", "..😀a"), Some(vec![6, 1]));
+        assert_eq!(get_unicode_indices("😀.é", "..😀é"), Some(vec![7, 6, 1]));
+        assert_eq!(get_unicode_indices("😀 a", "  😀a"), Some(vec![6, 1]));
+        assert_eq!(
+            get_unicode_indices("😀é", "..😀é"),
+            Some(vec![7, 6, 5, 4, 3, 2])
+        );
+    }
+
+    #[test]
     fn long_input_boundary_indices_stay_reverse_ordered() {
         for len in [511usize, 512, 513] {
             let haystack = format!("{}abc", "x".repeat(len - 3));

@@ -28,6 +28,7 @@ pub struct AlignmentPathIter<'a> {
     row_idx: usize,
     col_idx: usize,
     skipped_chars: usize,
+    unicode_haystack: Option<&'a [u8]>,
     max_typos: Option<u16>,
     typo_count: u16,
     score: u16,
@@ -42,6 +43,7 @@ impl<'a> AlignmentPathIter<'a> {
         needle_len: usize,
         haystack_chunks: usize,
         skipped_chars: usize,
+        unicode_haystack: Option<&'a [u8]>,
         score: u16,
         max_typos: Option<u16>,
     ) -> Self {
@@ -56,6 +58,7 @@ impl<'a> AlignmentPathIter<'a> {
             row_idx: needle_len,
             col_idx,
             skipped_chars,
+            unicode_haystack,
             max_typos,
             typo_count: 0,
             score,
@@ -126,6 +129,18 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
                 return Some(None);
             }
             return None;
+        }
+
+        // Cannot move up or left when on a continuation byte (multi-byte unicode char)
+        // so walk left
+        if let Some(haystack) = self.unicode_haystack
+            && haystack
+                .get(self.col_idx - self.lanes_per_chunk)
+                .is_some_and(|byte| byte & 0xC0 == 0x80)
+        {
+            self.col_idx -= 1;
+            self.score = self.get_score(self.row_idx, self.col_idx);
+            return Some(Some(Alignment::Left));
         }
 
         // Capture current position to yield (adjusted to 0-indexed haystack
