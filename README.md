@@ -21,6 +21,19 @@ let matches = match_list(needle, &haystacks, &Config::default());
 let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
 ```
 
+or use the (~10% slower) `fuzzy_match` iterator API
+
+```rust
+use frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
+
+let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+let mut matches: Vec<_> = haystacks
+    .iter()
+    .fuzzy_match("fBr", &Config::default())
+    .collect();
+radix_sort_matches(&mut matches);
+```
+
 ## Benchmarks
 
 See [BENCHMARKS.md](./BENCHMARKS.md)

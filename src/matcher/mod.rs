@@ -5,6 +5,7 @@ use crate::{Config, Match, MatchIndices};
 mod algo;
 mod backend;
 mod iter;
+mod parallel;
 use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
 pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
@@ -148,7 +149,7 @@ impl Matcher {
         matches
     }
 
-    pub(super) fn match_list_into<S: AsRef<str>>(
+    fn match_list_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -178,7 +179,7 @@ impl Matcher {
     /// Matches a single haystack, returning its [`Match`] if it passes.
     /// `empty_needle` and `needs_unicode` are precomputed by the caller so they
     /// aren't recomputed per item in the hot loop.
-    pub(super) fn match_one<S: AsRef<str>>(
+    fn match_one<S: AsRef<str>>(
         &mut self,
         haystack: S,
         index: u32,
@@ -197,7 +198,7 @@ impl Matcher {
 
     /// Matches a single haystack, returning its [`MatchIndices`] if it passes.
     /// See [`Matcher::match_one`].
-    pub(super) fn match_one_indices<S: AsRef<str>>(
+    fn match_one_indices<S: AsRef<str>>(
         &mut self,
         haystack: S,
         index: u32,
@@ -276,9 +277,8 @@ impl Matcher {
 
 #[cfg(test)]
 mod tests {
-    use super::super::match_list;
     use super::*;
-    use crate::CaseMatching;
+    use crate::{CaseMatching, match_list};
 
     #[test]
     fn test_basic() {

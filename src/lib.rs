@@ -37,6 +37,19 @@
 //! let matches = matcher.match_list(&haystacks);
 //! ```
 //!
+//! # Example: using `FuzzyMatchExt`
+//!
+//! ```rust
+//! use frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
+//!
+//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+//! let mut matches: Vec<_> = haystacks
+//!     .iter()
+//!     .fuzzy_match("fBr", &Config::default())
+//!     .collect();
+//! radix_sort_matches(&mut matches);
+//! ```
+
 use std::cmp::Ordering;
 
 #[cfg(feature = "serde")]
@@ -44,13 +57,15 @@ use serde::{Deserialize, Serialize};
 
 mod r#const;
 mod k_merge;
-mod one_shot;
+mod matcher;
 mod prefilter;
 mod smith_waterman;
 mod sort;
 
+use r#const::*;
+
 pub use k_merge::k_merge_matches;
-pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
+pub use matcher::Matcher;
 pub use sort::radix_sort_matches;
 
 /// Iterator extension for fuzzy matching
@@ -65,10 +80,33 @@ pub use sort::radix_sort_matches;
 ///     .collect();
 /// ```
 pub mod iter {
-    pub use crate::one_shot::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
+    pub use crate::matcher::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 }
 
-use r#const::*;
+pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
+    needle: S1,
+    haystacks: &[S2],
+    config: &Config,
+) -> Vec<Match> {
+    Matcher::new(needle.as_ref(), config).match_list(haystacks)
+}
+
+pub fn match_list_indices<S1: AsRef<str>, S2: AsRef<str>>(
+    needle: S1,
+    haystacks: &[S2],
+    config: &Config,
+) -> Vec<MatchIndices> {
+    Matcher::new(needle.as_ref(), config).match_list_indices(haystacks)
+}
+
+pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
+    needle: S1,
+    haystacks: &[S2],
+    config: &Config,
+    threads: usize,
+) -> Vec<Match> {
+    Matcher::new(needle.as_ref(), config).match_list_parallel(haystacks, threads)
+}
 
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
