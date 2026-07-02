@@ -17,40 +17,54 @@ use crate::{Config, Match, MatchIndices};
 ///     .collect();
 /// ```
 pub trait FuzzyMatchExt: Iterator + Sized {
-    /// Fuzzy matches each item against `needle`, yielding a [`Match`] for every
-    /// item that passes. See [`Matcher::match_iter`].
+    /// Fuzzy matches each item against `needle`, yielding a [`Match`] for every item that
+    /// passes. This API performs ~10% slower than the [`Matcher::match_list`] API.
+    ///
+    /// ```
+    /// use frizbee::{Config, iter::FuzzyMatchExt};
+    ///
+    /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+    /// let matches: Vec<_> = haystacks
+    ///     .iter()
+    ///     .fuzzy_match("fBr", &Config::default())
+    ///     .collect();
+    /// ```
     fn fuzzy_match(self, needle: &str, config: &Config) -> FuzzyMatch<Self>
     where
         Self::Item: AsRef<str>,
     {
-        let matcher = Matcher::new(needle, config);
-        let empty_needle = matcher.needle.is_empty();
-        let needs_unicode = matcher.config.unicode.respects_unicode_for(&matcher.needle);
         FuzzyMatch {
-            matcher,
+            matcher: Matcher::new(needle, config),
             iter: self,
             index: 0,
-            empty_needle,
-            needs_unicode,
         }
     }
 
-    /// Fuzzy matches each item against `needle`, yielding a [`MatchIndices`]
-    /// (includes the matched character indices) for every item that passes.
-    /// See [`Matcher::match_iter_indices`].
+    /// Fuzzy matches each item against `needle`, yielding a [`MatchIndices`], which are
+    /// equivalent to [`Match`] except they include the indices of the matched characters in the
+    /// haystack.
+    ///
+    /// This API has not been optimized for performance, and should only be used on small lists or
+    /// after matching a list of haystacks with [`fuzzy_match`]. Useful for displaying matched
+    /// indices in the UI.
+    ///
+    /// ```
+    /// use frizbee::{Config, iter::FuzzyMatchExt};
+    ///
+    /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+    /// let matches: Vec<_> = haystacks
+    ///     .iter()
+    ///     .fuzzy_match_indices("fBr", &Config::default())
+    ///     .collect();
+    /// ```
     fn fuzzy_match_indices(self, needle: &str, config: &Config) -> FuzzyMatchIndices<Self>
     where
         Self::Item: AsRef<str>,
     {
-        let matcher = Matcher::new(needle, config);
-        let empty_needle = matcher.needle.is_empty();
-        let needs_unicode = matcher.config.unicode.respects_unicode_for(&matcher.needle);
         FuzzyMatchIndices {
-            matcher,
+            matcher: Matcher::new(needle, config),
             iter: self,
             index: 0,
-            empty_needle,
-            needs_unicode,
         }
     }
 }
@@ -63,8 +77,6 @@ pub struct FuzzyMatch<I> {
     matcher: Matcher,
     iter: I,
     index: usize,
-    empty_needle: bool,
-    needs_unicode: bool,
 }
 
 impl<I> Iterator for FuzzyMatch<I>
@@ -80,10 +92,7 @@ where
             let index = u32::try_from(self.index)
                 .expect("too many items in haystack, will overflow the u32 index");
             self.index += 1;
-            if let Some(m) =
-                self.matcher
-                    .match_one(haystack, index, self.empty_needle, self.needs_unicode)
-            {
+            if let Some(m) = self.matcher.match_one(haystack, index) {
                 return Some(m);
             }
         }
@@ -101,8 +110,6 @@ pub struct FuzzyMatchIndices<I> {
     matcher: Matcher,
     iter: I,
     index: usize,
-    empty_needle: bool,
-    needs_unicode: bool,
 }
 
 impl<I> Iterator for FuzzyMatchIndices<I>
@@ -118,12 +125,7 @@ where
             let index = u32::try_from(self.index)
                 .expect("too many items in haystack, will overflow the u32 index");
             self.index += 1;
-            if let Some(m) = self.matcher.match_one_indices(
-                haystack,
-                index,
-                self.empty_needle,
-                self.needs_unicode,
-            ) {
+            if let Some(m) = self.matcher.match_one_indices(haystack, index) {
                 return Some(m);
             }
         }

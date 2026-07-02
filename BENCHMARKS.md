@@ -36,7 +36,7 @@ os: NixOS 26.11.0 (zokor) [64-bit]
 
 In each of the benchmarks, the median length of the haystacks is varied from 8 to 128.
 
-- **Frizbee**: Uses the `Options::default()`, where we perform the fastest prefilter since no typos are allowed
+- **Frizbee**: Uses the `Config::default()`, where we perform the fastest prefilter since no typos are allowed
 - **Parallel (x8)**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
 - **All Scores**: Set via `max_typos: None`, gets the scores for all of the items without any filtering
 - **1/2 Typos**: Set via `max_typos: Some(1 || 2)`, performs a slower, but still effective prefilter since a small number of typos are allowed

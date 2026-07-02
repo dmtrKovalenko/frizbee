@@ -15,6 +15,7 @@ pub struct Matcher {
     pub needle: String,
     pub config: Config,
     backend: MatcherBackend,
+    needs_unicode: bool,
 }
 
 /// Many variants so we use a macro to expand to the correct impl
@@ -70,25 +71,38 @@ impl Matcher {
             backend: Self::get_backend(needle, config),
             needle: needle.to_string(),
             config: config.clone(),
+            needs_unicode: config.unicode.respects_unicode_for(needle),
         }
     }
 
+    /// Updates the config and rebuilds the internal matcher backend.
+    /// Skipped if the config is the same as the previous one.
     pub fn set_config(&mut self, config: Config) {
         if self.config == config {
             return;
         }
         self.config = config;
+        self.needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
         self.backend = Self::get_backend(&self.needle, &self.config);
     }
 
+    /// Updates the needle string and rebuilds the internal matcher backend.
+    /// Skipped if the needle is the same as the previous one.
     pub fn set_needle(&mut self, needle: &str) {
         if self.needle == needle {
             return;
         }
         self.needle = needle.to_string();
+        self.needs_unicode = self.config.unicode.respects_unicode_for(needle);
         self.backend = Self::get_backend(&self.needle, &self.config);
     }
 
+    /// Matches a list of haystacks, returning a list of [`Match`] values.
+    /// This API provides the most performant path when matching on lists.
+    ///
+    /// This API should not be called with one item at a time as it performs dynamic dispatch to
+    /// the underlying backend. Instead, consider using the [`Matcher::match_iter`],
+    /// [`Matcher::match_one`] or [`iter::FuzzyMatchExt`] API.
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
         let mut matches = vec![];
         self.match_list_into(haystacks, 0, &mut matches);
@@ -98,38 +112,16 @@ impl Matcher {
         matches
     }
 
-    pub fn match_iter<S: AsRef<str>>(
-        &mut self,
-        haystacks: impl IntoIterator<Item = S>,
-    ) -> impl Iterator<Item = Match> {
-        let empty_needle = self.needle.is_empty();
-        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
-        haystacks
-            .into_iter()
-            .enumerate()
-            .filter_map(move |(index, haystack)| {
-                let index = u32::try_from(index)
-                    .expect("too many items in haystack, will overflow the u32 index");
-                self.match_one(haystack, index, empty_needle, needs_unicode)
-            })
-    }
-
-    pub fn match_iter_indices<S: AsRef<str>>(
-        &mut self,
-        haystacks: impl IntoIterator<Item = S>,
-    ) -> impl Iterator<Item = MatchIndices> {
-        let empty_needle = self.needle.is_empty();
-        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
-        haystacks
-            .into_iter()
-            .enumerate()
-            .filter_map(move |(index, haystack)| {
-                let index = u32::try_from(index)
-                    .expect("too many items in haystack, will overflow the u32 index");
-                self.match_one_indices(haystack, index, empty_needle, needs_unicode)
-            })
-    }
-
+    /// Matches a list of haystacks, returning a list of [`MatchIndices`] which are equivalent
+    /// to [`Match`] except they include the indices of the matched characters in the haystack.
+    ///
+    /// This API has not been optimized for performance, and should only be used on small lists or
+    /// after matching a list of haystacks with [`Matcher::match_list`]. Useful for displaying
+    /// matched indices in the UI.
+    ///
+    /// This API should not be called with one item at a time as it performs dynamic dispatch to
+    /// the underlying backend. Instead, consider using the [`Matcher::match_iter_indices`] or
+    /// [`iter::FuzzyMatchExt`] API.
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
         if self.needle.is_empty() {
@@ -147,6 +139,107 @@ impl Matcher {
             matches.sort_unstable();
         }
         matches
+    }
+
+    /// Returns an iterator over [`Match`] values for an iterator of strings. This API performs ~10%
+    /// slower than the [`Matcher::match_list`] API.
+    ///
+    /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more convenient API
+    /// for when re-using the [`Matcher`] isn't necessary.
+    ///
+    /// ```
+    /// use frizbee::{Config, iter::FuzzyMatchExt};
+    ///
+    /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+    /// let matches: Vec<_> = haystacks
+    ///     .iter()
+    ///     .fuzzy_match("fBr", &Config::default())
+    ///     .collect();
+    /// ```
+    pub fn match_iter<S: AsRef<str>>(
+        &mut self,
+        haystacks: impl IntoIterator<Item = S>,
+    ) -> impl Iterator<Item = Match> {
+        haystacks
+            .into_iter()
+            .enumerate()
+            .filter_map(move |(index, haystack)| {
+                let index = u32::try_from(index)
+                    .expect("too many items in haystack, will overflow the u32 index");
+                self.match_one(haystack, index)
+            })
+    }
+
+    /// Returns an iterator over [`MatchIndices`] values for an iterator of strings, which are
+    /// equivalent to [`Match`] except they include the indices of the matched characters in the
+    /// haystack.
+    ///
+    /// This API has not been optimized for performance, and should only be used on small lists or
+    /// after matching a list of haystacks with [`Matcher::match_iter`]. Useful for displaying
+    /// matched indices in the UI.
+    ///
+    /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more convenient API
+    /// for when re-using the [`Matcher`] isn't necessary.
+    ///
+    /// ```
+    /// use frizbee::{Config, iter::FuzzyMatchExt};
+    ///
+    /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+    /// let matches: Vec<_> = haystacks
+    ///     .iter()
+    ///     .fuzzy_match_indices("fBr", &Config::default())
+    ///     .collect();
+    /// ```
+    pub fn match_iter_indices<S: AsRef<str>>(
+        &mut self,
+        haystacks: impl IntoIterator<Item = S>,
+    ) -> impl Iterator<Item = MatchIndices> {
+        haystacks
+            .into_iter()
+            .enumerate()
+            .filter_map(move |(index, haystack)| {
+                let index = u32::try_from(index)
+                    .expect("too many items in haystack, will overflow the u32 index");
+                self.match_one_indices(haystack, index)
+            })
+    }
+
+    /// Matches a single haystack, returning its [`Match`] if it passes. This API performs ~10%
+    /// slower than the [`Matcher::match_list`] API.
+    ///
+    /// Consider using the [`Matcher::match_iter`] API or [`Matcher::match_list`] if you have more
+    /// than one haystack to match, as they perform significantly better.
+    pub fn match_one<S: AsRef<str>>(&mut self, haystack: S, index: u32) -> Option<Match> {
+        if self.needle.is_empty() {
+            return Some(Match::from_index(index as usize));
+        }
+        dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
+                unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
+            })
+        })
+    }
+
+    /// Matches a single haystack, returning its [`MatchIndices`] if it passes, which is
+    /// equivalent to [`Match`] except they include the indices of the matched characters in the
+    /// haystack.
+    ///
+    /// This API has not been optimized for performance, and should only be used on small lists or
+    /// after matching a list of haystacks with [`Matcher::match_one`], [`Matcher::match_iter`] or
+    /// [`Matcher::match_list`]. Useful for displaying matched indices in the UI.
+    pub fn match_one_indices<S: AsRef<str>>(
+        &mut self,
+        haystack: S,
+        index: u32,
+    ) -> Option<MatchIndices> {
+        if self.needle.is_empty() {
+            return Some(MatchIndices::from_index(index as usize));
+        }
+        dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
+                unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
+            })
+        })
     }
 
     fn match_list_into<S: AsRef<str>>(
@@ -176,51 +269,12 @@ impl Matcher {
         })
     }
 
-    /// Matches a single haystack, returning its [`Match`] if it passes.
-    /// `empty_needle` and `needs_unicode` are precomputed by the caller so they
-    /// aren't recomputed per item in the hot loop.
-    fn match_one<S: AsRef<str>>(
-        &mut self,
-        haystack: S,
-        index: u32,
-        empty_needle: bool,
-        needs_unicode: bool,
-    ) -> Option<Match> {
-        if empty_needle {
-            return Some(Match::from_index(index as usize));
-        }
-        dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
-            })
-        })
-    }
-
-    /// Matches a single haystack, returning its [`MatchIndices`] if it passes.
-    /// See [`Matcher::match_one`].
-    fn match_one_indices<S: AsRef<str>>(
-        &mut self,
-        haystack: S,
-        index: u32,
-        empty_needle: bool,
-        needs_unicode: bool,
-    ) -> Option<MatchIndices> {
-        if empty_needle {
-            return Some(MatchIndices::from_index(index as usize));
-        }
-        dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
-            })
-        })
-    }
-
     #[inline(always)]
     fn guard_against_haystack_overflow(haystack_len: usize, haystack_index_offset: u32) {
         assert!(
             haystack_len.saturating_add(haystack_index_offset as usize) <= (u32::MAX as usize),
             "too many items in haystack, will overflow the u32 index: {} > {} (index offset: {})",
-            haystack_len,
+            haystack_len + haystack_index_offset as usize,
             u32::MAX,
             haystack_index_offset
         );
