@@ -95,8 +95,8 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
         + scoring.matching_case_bonus as usize
         + scoring
             .delimiter_bonus
-            .max(scoring.capitalization_bonus)
-            .saturating_sub(scoring.gap_open_penalty) as usize;
+            .saturating_sub(scoring.gap_open_penalty)
+            .max(scoring.capitalization_bonus.div_ceil(2)) as usize;
     let max_matrix_score = max_per_char * needle_len + scoring.prefix_bonus as usize;
     max_matrix_score <= u8::MAX as usize
 }
