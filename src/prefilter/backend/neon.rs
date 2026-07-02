@@ -36,6 +36,7 @@ impl Backend for PrefilterNEONBackend {
     unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         unsafe {
             let mask = vorrq_u8(vceqq_u8(needle.0, chunk), vceqq_u8(needle.1, chunk));
+            // TODO: perform movemask only after checking is_zero (one op in NEON)
             movemask_u8(mask)
         }
     }
