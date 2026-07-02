@@ -136,9 +136,8 @@ impl Matcher {
             return (0..haystacks.len()).map(MatchIndices::from_index).collect();
         }
 
-        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
         let mut matches = dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
+            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
                 unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
             })
         });
