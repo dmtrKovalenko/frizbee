@@ -4,8 +4,6 @@
 
 use crate::{Scoring, prefilter::case_needle};
 
-const DELIMITERS: [u8; 7] = *b" /.,_-:";
-
 pub fn match_greedy(
     needle: &[u8],
     haystack: &[u8],
@@ -29,9 +27,11 @@ pub fn match_greedy(
         let haystack_start_idx = haystack_idx;
         while haystack_idx <= (haystack.len() - needle.len() + needle_idx) {
             let haystack_char = haystack[haystack_idx];
-            let haystack_is_delimiter = DELIMITERS.contains(&haystack_char);
-            let haystack_is_upper = (65..=90).contains(&haystack_char);
-            let haystack_is_lower = (97..=122).contains(&haystack_char);
+            let haystack_is_digit = haystack_char.is_ascii_digit();
+            let haystack_is_upper = haystack_char.is_ascii_uppercase();
+            let haystack_is_lower = haystack_char.is_ascii_lowercase();
+            let haystack_is_delimiter = haystack_char.is_ascii()
+                && !(haystack_is_lower || haystack_is_upper || haystack_is_digit);
 
             // Only enable delimiter bonus if we've seen a non-delimiter char
             if !haystack_is_delimiter {

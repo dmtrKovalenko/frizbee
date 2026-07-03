@@ -4,7 +4,7 @@ use super::backend::{Backend, ScoreVec};
 pub(crate) struct Matrix<B: Backend> {
     matrix: Vec<B::Score>,
     /// Number of LANES-wide chunks per row, including the leading zero column.
-    haystack_chunks: usize,
+    pub haystack_chunks: usize,
 }
 
 impl<B: Backend> Matrix<B> {

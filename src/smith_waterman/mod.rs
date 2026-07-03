@@ -64,7 +64,7 @@ pub(crate) mod backend;
 mod greedy;
 mod matrix;
 
-pub use alignment_iter::AlignmentPathIter;
+use alignment_iter::AlignmentPathIter;
 
 #[cfg(target_arch = "x86_64")]
 pub type SmithWatermanAVX512U8 = SmithWaterman<BackendAVX512U8>;
