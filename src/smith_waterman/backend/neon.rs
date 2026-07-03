@@ -399,8 +399,12 @@ impl NeonU8Bytes {
             if len == 0 {
                 return vdupq_n_u8(0);
             }
-            if len <= 8 {
+            if len < 8 {
                 let lo = NeonBytes::load_partial_safe(ptr, len);
+                return vcombine_u8(lo, vdup_n_u8(0));
+            }
+            if len == 8 {
+                let lo = vld1_u8(ptr);
                 return vcombine_u8(lo, vdup_n_u8(0));
             }
             // 9..=15 - load 8 + remainder
