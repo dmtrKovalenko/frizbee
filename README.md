@@ -21,7 +21,7 @@ let matches = match_list(needle, &haystacks, &Config::default());
 let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
 ```
 
-or use the (~10% slower) `fuzzy_match` iterator API
+or use the slightly slower `fuzzy_match` iterator API
 
 ```rust
 use frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
