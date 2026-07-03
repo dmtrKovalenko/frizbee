@@ -77,14 +77,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
 
         let needle_len = self.needle.len();
         let mut indices = Vec::with_capacity(needle_len);
-        let mut prev_haystack_idx = usize::MAX;
         for pos in self.iter_alignment_path(needle_len, haystack_start_pos, None, score, max_typos)
         {
             match pos {
-                Some(Alignment::Match((_, haystack_idx))) => {
-                    if prev_haystack_idx != haystack_idx {
-                        indices.push(haystack_idx);
-                        prev_haystack_idx = haystack_idx;
+                Some(Alignment::Match((needle_idx, haystack_idx))) => {
+                    let needle_char = self.needle.chars().nth(needle_idx).unwrap();
+                    for byte in 0..needle_char.len_utf8() {
+                        indices.push(haystack_idx - byte);
                     }
                 }
                 Some(_) => {}

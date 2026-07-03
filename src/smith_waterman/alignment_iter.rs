@@ -131,18 +131,6 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             return None;
         }
 
-        // Cannot move up or left when on a continuation byte (multi-byte unicode char)
-        // so walk left
-        if let Some(haystack) = self.unicode_haystack
-            && haystack
-                .get(self.col_idx - self.lanes_per_chunk)
-                .is_some_and(|byte| byte & 0xC0 == 0x80)
-        {
-            self.col_idx -= 1;
-            self.score = self.get_score(self.row_idx, self.col_idx);
-            return Some(Some(Alignment::Left));
-        }
-
         // Capture current position to yield (adjusted to 0-indexed haystack
         // bytes; `skipped_chars` is a byte offset since the prefilter operates
         // on 16-byte chunks).
@@ -150,6 +138,18 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             self.row_idx - 1,
             self.col_idx - self.lanes_per_chunk + self.skipped_chars,
         );
+
+        // Cannot move up or left when on a continuation byte (multi-byte unicode char)
+        // so walk left
+        if let Some(haystack) = self.unicode_haystack
+            && haystack
+                .get(current_pos.1)
+                .is_some_and(|byte| byte & 0xC0 == 0x80)
+        {
+            self.col_idx -= 1;
+            self.score = self.get_score(self.row_idx, self.col_idx);
+            return Some(Some(Alignment::Left));
+        }
 
         if self.get_is_match(self.row_idx, self.col_idx) {
             self.row_idx -= 1;
