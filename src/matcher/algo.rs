@@ -268,7 +268,7 @@ where
     fn smith_waterman_indices_one<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
-        skipped_chars: usize,
+        haystack_start_pos: usize,
         index: u32,
         include_exact: bool,
         max_typos: Option<u16>,
@@ -276,12 +276,12 @@ where
         let (mut score, indices) = if UNICODE {
             self.smith_waterman.score_haystack_unicode_indices(
                 haystack,
-                skipped_chars,
+                haystack_start_pos,
                 max_typos,
             )?
         } else {
             self.smith_waterman
-                .score_haystack_indices(haystack, skipped_chars, max_typos)?
+                .score_haystack_indices(haystack, haystack_start_pos, max_typos)?
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -314,9 +314,9 @@ where
         let scoring = &self.config.scoring;
         let max_per_char_score = scoring.match_score
             + scoring
-                .capitalization_bonus
-                .max(scoring.delimiter_bonus)
+                .delimiter_bonus
                 .saturating_sub(scoring.gap_open_penalty)
+                .max(scoring.capitalization_bonus.div_ceil(2))
             + scoring.matching_case_bonus;
         let max_needle_len =
             (u16::MAX - scoring.prefix_bonus - scoring.exact_match_bonus) / max_per_char_score;

@@ -220,6 +220,7 @@ impl Eq for MatchIndices {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
     /// The maximum number of characters missing from the needle, before an item in the
     /// haystack is filtered out
@@ -299,6 +300,7 @@ impl UnicodeMatching {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Scoring {
     /// Score for a matching character between needle and haystack
     pub match_score: u16,

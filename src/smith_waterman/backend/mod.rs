@@ -12,12 +12,12 @@
 //! through chunk arithmetic, the matrix stride, the alignment-path iterator,
 //! and the horizontal-gap propagation unroll.
 //!
-//! Availabled backends:
+//! Available backends:
 //!   - AVX-512: LANES = 32/64 (scoring u16 x 32 = 512-bit or u8 x 64 = 512-bit)
 //!   - AVX2:    LANES = 16/32 (scoring u16 x 16 = 256-bit or u8 x 32 = 256-bit)
 //!   - SSE:     LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - NEON:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
-//!   - Scalar:  LANES = 16/32 (fallback for non-SIMD systems)
+//!   - Scalar:  LANES = 8/16 (fallback for non-SIMD systems)
 
 #[cfg(target_arch = "x86_64")]
 mod avx;
@@ -200,7 +200,7 @@ pub trait MaskVec: Copy + core::fmt::Debug {
     fn to_lanes(self) -> Vec<bool>;
 }
 
-/// A score-wide vector holding `LANES` u16 elements.
+/// A score-wide vector holding `LANES` u8 or u16 elements.
 pub trait ScoreVec: Copy + core::fmt::Debug {
     /// Zero in every lane.
     ///

@@ -1,7 +1,7 @@
 use super::backend::{Backend, ScoreVec};
 use super::matrix::Matrix;
 
-pub enum Alignment {
+pub(crate) enum Alignment {
     Left,
     Up,
     Match((usize, usize)),
@@ -17,7 +17,7 @@ pub enum Alignment {
 /// element width (1 or 2 bytes) are resolved at construction so the body
 /// monomorphizes once instead of per backend. The element-width branch in
 /// `get_score` / `get_is_match` is a single field load + compare
-pub struct AlignmentPathIter<'a> {
+pub(crate) struct AlignmentPathIter<'a> {
     score_matrix: &'a [u8],
     match_masks: &'a [u8],
     /// Number of byte-positions in one row = chunks_per_row * LANES * LANE_BYTES.
@@ -27,7 +27,7 @@ pub struct AlignmentPathIter<'a> {
     lane_bytes: usize,
     row_idx: usize,
     col_idx: usize,
-    skipped_chars: usize,
+    haystack_start_pos: usize,
     unicode_haystack: Option<&'a [u8]>,
     max_typos: Option<u16>,
     typo_count: u16,
@@ -42,7 +42,7 @@ impl<'a> AlignmentPathIter<'a> {
         match_masks: &'a Matrix<B>,
         needle_len: usize,
         haystack_chunks: usize,
-        skipped_chars: usize,
+        haystack_start_pos: usize,
         unicode_haystack: Option<&'a [u8]>,
         score: u16,
         max_typos: Option<u16>,
@@ -57,7 +57,7 @@ impl<'a> AlignmentPathIter<'a> {
             lane_bytes: B::LANE_BYTES,
             row_idx: needle_len,
             col_idx,
-            skipped_chars,
+            haystack_start_pos,
             unicode_haystack,
             max_typos,
             typo_count: 0,
@@ -131,12 +131,9 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             return None;
         }
 
-        // Capture current position to yield (adjusted to 0-indexed haystack
-        // bytes; `skipped_chars` is a byte offset since the prefilter operates
-        // on 16-byte chunks).
         let current_pos = (
             self.row_idx - 1,
-            self.col_idx - self.lanes_per_chunk + self.skipped_chars,
+            self.col_idx - self.lanes_per_chunk + self.haystack_start_pos,
         );
 
         // Cannot move up or left when on a continuation byte (multi-byte unicode char)

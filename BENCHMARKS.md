@@ -38,13 +38,12 @@ In each of the benchmarks, the median length of the haystacks is varied from 8 t
 
 - **Frizbee**: Uses the `Config::default()`, where we perform the fastest prefilter since no typos are allowed
 - **Iter**: Same as **Frizbee**, but uses the `match_iter` API to lazily match haystacks one at a time
-- **Parallel (x8)**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
 - **All Scores**: Set via `max_typos: None`, gets the scores for all of the items without any filtering
 - **1/2 Typos**: Set via `max_typos: Some(1 || 2)`, performs a slower, but still effective prefilter since a small number of typos are allowed
 - **3 Typos**: Set via `max_typos: Some(3)`, skips prefiltering since in non-syntheic data (Chromium), the prefilter has to pass over the data up to 4 times and most items will not be filtered out
 - **Nucleo**: Runs with normalization disabled, case insensitivity enabled and fuzzy matching enabled
 - **FZF**: Times only the matching part via `fzf --filter linux --tiebreak index --bench 10s --threads 1 < benches/match_list/data.txt`
-- **$BENCH/Parallel (x8)**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
+- **BENCH/Parallel (x8)**: Same as BENCH, but uses 8 threads to perform the matching in parallel
 
 ## Benchmark Results
 

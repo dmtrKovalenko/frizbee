@@ -10,9 +10,9 @@ struct DatasetBenchmark {
     path: &'static str,
     needle: &'static str,
     // fzf --filter needle --tiebreak index --bench 10s --threads 1 < path
-    fff_sequential: Duration,
+    fzf_sequential: Duration,
     // fzf --filter needle --tiebreak index --bench 10s --threads 8 < path
-    fff_parallel: Duration,
+    fzf_parallel: Duration,
 }
 
 const DATASET_BENCHMARKS: &[DatasetBenchmark] = &[
@@ -20,22 +20,22 @@ const DATASET_BENCHMARKS: &[DatasetBenchmark] = &[
         name: "Chromium",
         path: "benches/data/chromium.txt",
         needle: "linux",
-        fff_sequential: Duration::from_micros(120610),
-        fff_parallel: Duration::from_micros(16170),
+        fzf_sequential: Duration::from_micros(120610),
+        fzf_parallel: Duration::from_micros(16170),
     },
     DatasetBenchmark {
         name: "Arabic",
         path: "benches/data/arabic_unicode.txt",
         needle: "إن",
-        fff_sequential: Duration::from_micros(165730),
-        fff_parallel: Duration::from_micros(21960),
+        fzf_sequential: Duration::from_micros(165730),
+        fzf_parallel: Duration::from_micros(21960),
     },
     DatasetBenchmark {
         name: "Korean",
         path: "benches/data/korean_unicode.txt",
         needle: "니다",
-        fff_sequential: Duration::from_micros(114320),
-        fff_parallel: Duration::from_micros(15390),
+        fzf_sequential: Duration::from_micros(114320),
+        fzf_parallel: Duration::from_micros(15390),
     },
 ];
 
@@ -53,8 +53,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             dataset.name,
             dataset.needle,
             &haystack,
-            dataset.fff_sequential,
-            dataset.fff_parallel,
+            dataset.fzf_sequential,
+            dataset.fzf_parallel,
         );
     }
 

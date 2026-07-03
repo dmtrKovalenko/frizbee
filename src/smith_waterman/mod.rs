@@ -21,7 +21,7 @@
 //!
 //! needle:      [o   o   o   o]
 //! haystack:    [/   l   o   n]
-//! match mask:  [f   f   t   f]
+//! match mask:  [N   N   Y   N]
 //!
 //! diagonal:    [10  9   8   16]
 //! up:          [9   8   16  11]
@@ -123,13 +123,13 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
     fn score_haystack_indices(
         &mut self,
         haystack: &[u8],
-        skipped_chars: usize,
+        haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)>;
     fn score_haystack_unicode_indices(
         &mut self,
         haystack: &[u8],
-        skipped_chars: usize,
+        haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)>;
     fn score_haystack(&mut self, haystack: &[u8]) -> u16;

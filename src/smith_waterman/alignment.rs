@@ -1,13 +1,11 @@
-use crate::smith_waterman::{AlignmentPathIter, SmithWaterman};
-
-use super::backend::Backend;
+use super::{AlignmentPathIter, SmithWaterman, backend::Backend};
 
 impl<B: Backend> SmithWaterman<B> {
     #[inline(always)]
     pub fn iter_alignment_path<'a>(
         &'a self,
         needle_len: usize,
-        skipped_chars: usize,
+        haystack_start_pos: usize,
         unicode_haystack: Option<&'a [u8]>,
         score: u16,
         max_typos: Option<u16>,
@@ -17,7 +15,7 @@ impl<B: Backend> SmithWaterman<B> {
             &self.match_masks,
             needle_len,
             self.haystack_chunks,
-            skipped_chars,
+            haystack_start_pos,
             unicode_haystack,
             score,
             max_typos,

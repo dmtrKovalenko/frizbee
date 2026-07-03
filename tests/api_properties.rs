@@ -58,7 +58,7 @@ impl ApiCase {
 
 #[test]
 fn generated_public_api_properties() {
-    run_generated_inputs(192, test_bound(4096, 384), |input| {
+    run_generated_inputs(1024, test_bound(4096, 384), |input| {
         let case = ApiCase::from_bytes(input);
         assert_public_api_case(&case);
     });

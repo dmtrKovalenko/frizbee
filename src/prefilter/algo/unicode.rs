@@ -162,7 +162,6 @@ impl<B: Backend> Prefilter<B> {
 
                 chunk_mask = chunk_mask.clear_through_lowest(mask);
                 if can_skip_chunks {
-                    // since we match on the final byte, subtract the byte length of the char
                     match_start_pos = start + mask.trailing_zeros();
                     can_skip_chunks = false;
                 }
