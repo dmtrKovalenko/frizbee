@@ -1,5 +1,5 @@
 use criterion::BenchmarkId;
-use frizbee::{Config, Matcher, radix_sort_matches};
+use neo_frizbee::{Config, Matcher, radix_sort_matches};
 use std::{
     hint::black_box,
     sync::Arc,
@@ -228,8 +228,8 @@ fn match_list_parallel(
     needle: &str,
     haystack: &[&str],
     max_typos: Option<u16>,
-) -> Vec<frizbee::Match> {
-    frizbee::match_list_parallel(
+) -> Vec<neo_frizbee::Match> {
+    neo_frizbee::match_list_parallel(
         black_box(needle),
         black_box(haystack),
         black_box(&Config {

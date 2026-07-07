@@ -11,7 +11,7 @@ For commercial support, please [contact me](mailto:frizbee@liam.super.fish). I'd
 See [the docs](https://docs.rs/frizbee) for more usage examples.
 
 ```rust
-use frizbee::{match_list, match_list_parallel, Config};
+use neo_frizbee::{match_list, match_list_parallel, Config};
 
 let needle = "fBr";
 let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -24,7 +24,7 @@ let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
 or use the slightly slower `fuzzy_match` iterator API
 
 ```rust
-use frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
+use neo_frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
 
 let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 let mut matches: Vec<_> = haystacks

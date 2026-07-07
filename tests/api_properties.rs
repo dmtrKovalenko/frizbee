@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use frizbee::{
+use neo_frizbee::{
     CaseMatching, Config, Match, MatchIndices, Matcher, Scoring, match_list, match_list_indices,
     match_list_parallel,
 };
