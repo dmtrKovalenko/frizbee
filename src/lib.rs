@@ -13,7 +13,7 @@
 //! # Example: using `match_list`
 //!
 //! ```rust
-//! use frizbee::{match_list, match_list_parallel, Config};
+//! use neo_frizbee::{match_list, match_list_parallel, Config};
 //!
 //! let needle = "fBr";
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -28,7 +28,7 @@
 //! Useful for when you want to match one needle against more than one haystack.
 //!
 //! ```rust
-//! use frizbee::{Matcher, Config};
+//! use neo_frizbee::{Matcher, Config};
 //!
 //! let needle = "fBr";
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -40,7 +40,7 @@
 //! # Example: using `FuzzyMatchExt`
 //!
 //! ```rust
-//! use frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
+//! use neo_frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
 //!
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 //! let mut matches: Vec<_> = haystacks
@@ -64,6 +64,7 @@ mod sort;
 
 use r#const::*;
 
+pub use r#const::SIMD_CHUNK_BYTES;
 pub use k_merge::k_merge_matches;
 pub use matcher::Matcher;
 pub use sort::radix_sort_matches;
@@ -71,7 +72,7 @@ pub use sort::radix_sort_matches;
 /// Iterator extension for fuzzy matching
 ///
 /// ```
-/// use frizbee::{Config, iter::FuzzyMatchExt};
+/// use neo_frizbee::{Config, iter::FuzzyMatchExt};
 ///
 /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 /// let matches: Vec<_> = haystacks
@@ -127,6 +128,38 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
     threads: usize,
 ) -> Vec<Match> {
     Matcher::new(needle.as_ref(), config).match_list_parallel(haystacks, threads)
+}
+
+/// Matches items in parallel on multiple real threads, resolving each item's haystack bytes
+/// through the `resolve` callback, returning a list of [`Match`] values. Threads work on
+/// 2048 item chunks, which are sorted and merged into a single sorted `Vec` at the end.
+/// The `threads` must be >0.
+///
+/// For each item, `resolve` is called with a stack buffer. It should fill the buffer with
+/// pointers to [`SIMD_CHUNK_BYTES`]-wide chunks of the haystack (e.g. into an arena) and return
+/// `Some((chunk_count, byte_len))`, or `None` to skip the item (e.g. deleted files). This avoids
+/// materializing contiguous strings for items whose bytes live in non-contiguous storage.
+///
+/// `N` is the chunk pointer capacity and must cover the longest haystack:
+/// `max_haystack_bytes.div_ceil(SIMD_CHUNK_BYTES)`.
+///
+/// # Pointer contract
+/// Each returned chunk pointer `i` must be readable for
+/// `min(SIMD_CHUNK_BYTES, byte_len - i * SIMD_CHUNK_BYTES)` bytes. Violating this results in
+/// undefined behavior.
+pub fn match_list_parallel_resolved<S1, T, F, const N: usize>(
+    needle: S1,
+    items: &[T],
+    resolve: &F,
+    config: &Config,
+    threads: usize,
+) -> Vec<Match>
+where
+    S1: AsRef<str>,
+    T: Sync,
+    F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)> + Sync,
+{
+    Matcher::new(needle.as_ref(), config).match_list_parallel_resolved(items, resolve, threads)
 }
 
 #[derive(Debug, Clone, Copy)]

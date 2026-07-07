@@ -70,7 +70,7 @@ impl Matcher {
         Self {
             backend: Self::get_backend(needle, config),
             needle: needle.to_string(),
-            config: config.clone(),
+            config: *config,
             needs_unicode: config.unicode.respects_unicode_for(needle),
         }
     }
@@ -155,7 +155,7 @@ impl Matcher {
     /// for when re-using the [`Matcher`] isn't necessary.
     ///
     /// ```
-    /// use frizbee::{Config, iter::FuzzyMatchExt};
+    /// use neo_frizbee::{Config, iter::FuzzyMatchExt};
     ///
     /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
     /// let matches: Vec<_> = haystacks
@@ -189,7 +189,7 @@ impl Matcher {
     /// for when re-using the [`Matcher`] isn't necessary.
     ///
     /// ```
-    /// use frizbee::{Config, iter::FuzzyMatchExt};
+    /// use neo_frizbee::{Config, iter::FuzzyMatchExt};
     ///
     /// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
     /// let matches: Vec<_> = haystacks
@@ -269,6 +269,56 @@ impl Matcher {
                     matcher.match_list::<TYPOS, UNICODE, S>(
                         haystacks,
                         haystack_index_offset,
+                        matches,
+                    )
+                }
+            })
+        })
+    }
+
+    /// Matches items whose haystack bytes are resolved through a caller-provided callback,
+    /// appending the results to `matches`.
+    ///
+    /// For each item, `resolve` is called with a stack buffer. It should fill the buffer with
+    /// pointers to [`crate::SIMD_CHUNK_BYTES`]-wide chunks of the haystack and return
+    /// `Some((chunk_count, byte_len))`, or `None` to skip the item (e.g. deleted files).
+    ///
+    /// `N` is the chunk pointer capacity and must cover the longest haystack:
+    /// `max_haystack_bytes.div_ceil(SIMD_CHUNK_BYTES)`.
+    ///
+    /// # Pointer contract
+    /// Each returned chunk pointer `i` must be readable for
+    /// `min(SIMD_CHUNK_BYTES, byte_len - i * SIMD_CHUNK_BYTES)` bytes. Violating this results
+    /// in undefined behavior.
+    pub fn match_list_resolved_into<T, F, const N: usize>(
+        &mut self,
+        items: &[T],
+        item_index_offset: u32,
+        resolve: &F,
+        matches: &mut Vec<Match>,
+    ) where
+        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
+    {
+        Self::guard_against_haystack_overflow(items.len(), item_index_offset);
+        if self.needle.is_empty() {
+            let mut chunk_ptrs = [core::ptr::null::<u8>(); N];
+            matches.extend(
+                items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| resolve(item, &mut chunk_ptrs).is_some())
+                    .map(|(i, _)| Match::from_index(i + item_index_offset as usize)),
+            );
+            return;
+        }
+
+        dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
+                unsafe {
+                    matcher.match_list_resolved::<TYPOS, UNICODE, T, F, N>(
+                        items,
+                        item_index_offset,
+                        resolve,
                         matches,
                     )
                 }
@@ -642,7 +692,7 @@ mod tests {
             sort: false,
             ..Config::default()
         };
-        matcher.set_config(second_config.clone());
+        matcher.set_config(second_config);
         let second = matcher.match_list(&second_haystacks);
         assert_eq!(
             &second,
@@ -661,7 +711,7 @@ mod tests {
             sort: false,
             ..Config::default()
         };
-        matcher.set_config(unicode_config.clone());
+        matcher.set_config(unicode_config);
         let unicode = matcher.match_list(&unicode_haystacks);
         assert_eq!(
             &unicode,
@@ -675,7 +725,7 @@ mod tests {
             sort: true,
             ..Config::default()
         };
-        matcher.set_config(third_config.clone());
+        matcher.set_config(third_config);
         let third = matcher.match_list(&first_haystacks);
         assert_eq!(&third, &match_list("fB", &first_haystacks, &third_config));
     }

@@ -113,6 +113,30 @@ macro_rules! impl_specialized {
             ) -> Option<MatchIndices> {
                 self.match_one_indices_impl::<TYPOS, UNICODE, H>(haystack, index)
             }
+
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_list_resolved<
+                const TYPOS: u16,
+                const UNICODE: bool,
+                T,
+                F,
+                const N: usize,
+            >(
+                &mut self,
+                items: &[T],
+                item_index_offset: u32,
+                resolve: &F,
+                matches: &mut Vec<Match>,
+            ) where
+                F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
+            {
+                self.match_list_resolved_into_impl::<TYPOS, UNICODE, T, F, N>(
+                    items,
+                    item_index_offset,
+                    resolve,
+                    matches,
+                )
+            }
         }
     };
 }

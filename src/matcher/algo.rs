@@ -1,3 +1,4 @@
+use crate::r#const::SIMD_CHUNK_BYTES;
 use crate::prefilter::{Kernel as PrefilterKernel, Window};
 use crate::smith_waterman::Kernel as SmithWatermanKernel;
 use crate::{Config, Match, MatchIndices};
@@ -37,6 +38,15 @@ pub(crate) trait Specialized: Sized {
         haystack: H,
         index: u32,
     ) -> Option<MatchIndices>;
+
+    unsafe fn match_list_resolved<const TYPOS: u16, const UNICODE: bool, T, F, const N: usize>(
+        &mut self,
+        items: &[T],
+        item_index_offset: u32,
+        resolve: &F,
+        matches: &mut Vec<Match>,
+    ) where
+        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>;
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +68,7 @@ where
         let case_sensitive = config.casing.respects_case_for(needle);
         let matcher = Self {
             needle: needle.to_string(),
-            config: config.clone(),
+            config: *config,
             min_haystack_len: config
                 .max_typos
                 .map(|max| needle.chars().count().saturating_sub(max as usize))
@@ -98,6 +108,75 @@ where
                         include_exact,
                     ));
                 }
+            }
+        }
+    }
+
+    /// Hot loop for the resolver-based matching API
+    /// ([`crate::match_list_parallel_resolved`]). For each item, `resolve` fills the
+    /// caller-provided pointer buffer with [`SIMD_CHUNK_BYTES`]-wide chunk pointers and returns
+    /// `Some((chunk_count, byte_len))`, or `None` to skip the item (e.g. deleted files).
+    ///
+    /// The chunks are gathered into a reusable scratch buffer and matched through the same
+    /// prefilter + smith waterman pipeline as [`Self::match_list_into_impl`].
+    #[inline(always)]
+    pub(super) fn match_list_resolved_into_impl<
+        const TYPOS: u16,
+        const UNICODE: bool,
+        T,
+        F,
+        const N: usize,
+    >(
+        &mut self,
+        items: &[T],
+        item_index_offset: u32,
+        resolve: &F,
+        matches: &mut Vec<Match>,
+    ) where
+        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
+    {
+        let max_typos = self.max_typos_runtime::<TYPOS>();
+        let mut chunk_ptrs = [core::ptr::null::<u8>(); N];
+        let mut scratch: Vec<u8> = Vec::with_capacity(N * SIMD_CHUNK_BYTES);
+
+        for (index, item) in (item_index_offset..).zip(items.iter()) {
+            let Some((chunk_count, byte_len)) = resolve(item, &mut chunk_ptrs) else {
+                continue;
+            };
+            let original_len = byte_len as usize;
+            if original_len < self.min_haystack_len {
+                continue;
+            }
+            debug_assert!(
+                chunk_count == original_len.div_ceil(SIMD_CHUNK_BYTES),
+                "chunk_count {chunk_count} does not cover byte_len {original_len}"
+            );
+
+            // Gather the chunks into a contiguous scratch buffer
+            scratch.clear();
+            scratch.reserve(original_len);
+            unsafe {
+                let dst = scratch.as_mut_ptr();
+                for (i, &ptr) in chunk_ptrs[..chunk_count].iter().enumerate() {
+                    let start = i * SIMD_CHUNK_BYTES;
+                    let take = SIMD_CHUNK_BYTES.min(original_len - start);
+                    core::ptr::copy_nonoverlapping(ptr, dst.add(start), take);
+                }
+                scratch.set_len(original_len);
+            }
+
+            let haystack = scratch.as_slice();
+            let (matched, start_pos, end_pos) =
+                self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
+            if matched {
+                let trimmed = &haystack[start_pos..end_pos];
+                let include_exact = start_pos == 0 && end_pos == original_len;
+                matches.push(self.smith_waterman_one::<UNICODE>(
+                    trimmed,
+                    index,
+                    start_pos,
+                    include_exact,
+                ));
             }
         }
     }
