@@ -182,6 +182,25 @@ where
     Matcher::new(needle.as_ref(), config).match_list_parallel_resolved(items, resolve, threads)
 }
 
+/// Index-based form of [`match_list_parallel_resolved`]: matches `len` items,
+/// resolving item `i` through `resolve(i, buf)`. Needs no contiguous slice of
+/// items and is instantiated once per resolver closure. See
+/// [`Matcher::match_range_resolved_into`] for the resolver contract.
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
+pub fn match_range_parallel_resolved<S, F, const N: usize>(
+    needle: S,
+    len: usize,
+    resolve: &F,
+    config: &Config,
+    threads: usize,
+) -> Vec<Match>
+where
+    S: AsRef<str>,
+    F: Fn(u32, &mut [*const u8; N]) -> Option<(usize, u16)> + Sync,
+{
+    Matcher::new(needle.as_ref(), config).match_range_parallel_resolved(len, resolve, threads)
+}
+
 /// Result of a fuzzy match, containing the score and index in the haystack
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

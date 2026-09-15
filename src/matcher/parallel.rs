@@ -102,24 +102,26 @@ impl Matcher {
             }
         })
     }
-    /// Matches items in parallel on multiple real threads, resolving each
-    /// item's haystack bytes through the `resolve` callback, returning a list
-    /// of [`Match`] values ordered by the configured [`SortStrategy`].
+    /// Matches `len` items in parallel on multiple real threads, resolving
+    /// each item's haystack bytes by index through `resolve`, returning a list
+    /// of [`Match`] values ordered by the configured [`SortStrategy`]. This is
+    /// the primitive behind [`Matcher::match_list_parallel_resolved`]: it needs
+    /// no contiguous slice of items and is instantiated once per resolver
+    /// closure.
     ///
     /// If `threads == 0`, the matcher will default to available CPU cores - 2.
     ///
-    /// See [`Matcher::match_list_resolved_into`] for the resolver contract.
-    pub fn match_list_parallel_resolved<T, F, const N: usize>(
+    /// See [`Matcher::match_range_resolved_into`] for the resolver contract.
+    pub fn match_range_parallel_resolved<F, const N: usize>(
         &mut self,
-        items: &[T],
+        len: usize,
         resolve: &F,
         threads: usize,
     ) -> Vec<Match>
     where
-        T: Sync,
-        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)> + Sync,
+        F: Fn(u32, &mut [*const u8; N]) -> Option<(usize, u16)> + Sync,
     {
-        Self::guard_against_haystack_overflow(items.len(), 0);
+        Self::guard_against_haystack_overflow(len, 0);
 
         // If threads == 0, default to available cpu cores
         let mut threads = threads;
@@ -131,13 +133,13 @@ impl Matcher {
         }
 
         // Limit threads based on the number of items
-        let threads = threads.min(items.len().div_ceil(ITEMS_PER_THREAD)).max(1);
+        let threads = threads.min(len.div_ceil(ITEMS_PER_THREAD)).max(1);
 
-        if items.is_empty() || self.patterns.is_empty() || threads == 1 {
-            return self.match_list_resolved(items, resolve);
+        if len == 0 || self.patterns.is_empty() || threads == 1 {
+            return self.match_range_resolved(len, resolve);
         }
 
-        let num_chunks = items.len().div_ceil(CHUNK_SIZE);
+        let num_chunks = len.div_ceil(CHUNK_SIZE);
         let next_chunk = AtomicUsize::new(0);
 
         let matcher = &*self;
@@ -158,11 +160,10 @@ impl Matcher {
                             }
 
                             let start = chunk_idx * CHUNK_SIZE;
-                            let end = (start + CHUNK_SIZE).min(items.len());
+                            let end = (start + CHUNK_SIZE).min(len);
 
-                            matcher.match_list_resolved_into_with(
-                                &items[start..end],
-                                start as u32,
+                            matcher.match_range_resolved_into_with(
+                                start as u32..end as u32,
                                 resolve,
                                 &mut local_matches,
                                 &mut scratch,
@@ -193,6 +194,25 @@ impl Matcher {
                 SortStrategy::Unsorted => matches.into_iter().flatten().collect(),
             }
         })
+    }
+
+    /// Slice-based form of [`Matcher::match_range_parallel_resolved`]:
+    /// resolves `items[i]` for each index.
+    pub fn match_list_parallel_resolved<T, F, const N: usize>(
+        &mut self,
+        items: &[T],
+        resolve: &F,
+        threads: usize,
+    ) -> Vec<Match>
+    where
+        T: Sync,
+        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)> + Sync,
+    {
+        self.match_range_parallel_resolved(
+            items.len(),
+            &|index, buf| resolve(&items[index as usize], buf),
+            threads,
+        )
     }
 }
 

@@ -12,6 +12,7 @@ use crate::Match;
 use crate::r#const::SIMD_CHUNK_BYTES;
 use crate::sort::radix_sort_matches;
 use alloc::vec::Vec;
+use core::ops::Range;
 
 /// Items gathered per batch. Bounds the scratch buffer to
 /// `GATHER_BATCH * max_haystack_len` bytes so it stays cache-resident while the
@@ -32,21 +33,20 @@ pub(super) struct ResolvedScratch {
 }
 
 impl Matcher {
-    /// Matches items whose haystack bytes are resolved through a caller-provided
-    /// callback, returning a list of [`Match`] values ordered by the configured
-    /// [`crate::SortStrategy`].
+    /// Matches `len` items whose haystack bytes are resolved by index through
+    /// a caller-provided callback, returning a list of [`Match`] values
+    /// ordered by the configured [`crate::SortStrategy`]. This is the
+    /// primitive behind the slice-based resolver APIs: it needs no contiguous
+    /// slice of items and is instantiated once per resolver closure.
     ///
-    /// See [`Matcher::match_list_resolved_into`] for the resolver contract.
-    pub fn match_list_resolved<T, F, const N: usize>(
-        &mut self,
-        items: &[T],
-        resolve: &F,
-    ) -> Vec<Match>
+    /// See [`Matcher::match_range_resolved_into`] for the resolver contract.
+    pub fn match_range_resolved<F, const N: usize>(&mut self, len: usize, resolve: &F) -> Vec<Match>
     where
-        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
+        F: Fn(u32, &mut [*const u8; N]) -> Option<(usize, u16)>,
     {
+        Self::guard_against_haystack_overflow(len, 0);
         let mut matches = Vec::new();
-        self.match_list_resolved_into(items, 0, resolve, &mut matches);
+        self.match_range_resolved_into(0..len as u32, resolve, &mut matches);
         if self.config.sort.is_reversed() {
             matches.reverse();
         }
@@ -56,10 +56,11 @@ impl Matcher {
         matches
     }
 
-    /// Matches items whose haystack bytes are resolved through a caller-provided
-    /// callback, appending the results to `matches` in item order (unsorted).
+    /// Matches the items with indices in `range`, resolving each one's haystack
+    /// bytes through `resolve`, and appends the results to `matches` in index
+    /// order (unsorted). Match indices are the indices passed to `resolve`.
     ///
-    /// For each item, `resolve` is called with a stack buffer. It should fill
+    /// For each index, `resolve` is called with a stack buffer. It should fill
     /// the buffer with pointers to [`crate::SIMD_CHUNK_BYTES`]-wide chunks of
     /// the haystack and return `Some((chunk_count, byte_len))`, or `None` to
     /// skip the item (e.g. deleted files). `chunk_count` must equal
@@ -74,6 +75,35 @@ impl Matcher {
     /// a chunk arena), and the first `byte_len` gathered bytes must form valid
     /// UTF-8 (i.e. the chunks were produced by splitting a `str`). Violating
     /// this results in undefined behavior.
+    pub fn match_range_resolved_into<F, const N: usize>(
+        &mut self,
+        range: Range<u32>,
+        resolve: &F,
+        matches: &mut Vec<Match>,
+    ) where
+        F: Fn(u32, &mut [*const u8; N]) -> Option<(usize, u16)>,
+    {
+        let mut scratch = ResolvedScratch::default();
+        self.match_range_resolved_into_with(range, resolve, matches, &mut scratch);
+    }
+
+    /// Slice-based form of [`Matcher::match_range_resolved`]: resolves
+    /// `items[i]` for each index.
+    pub fn match_list_resolved<T, F, const N: usize>(
+        &mut self,
+        items: &[T],
+        resolve: &F,
+    ) -> Vec<Match>
+    where
+        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
+    {
+        self.match_range_resolved(items.len(), &|index, buf| {
+            resolve(&items[index as usize], buf)
+        })
+    }
+
+    /// Slice-based form of [`Matcher::match_range_resolved_into`]: item `i`
+    /// is reported with index `i + item_index_offset`.
     pub fn match_list_resolved_into<T, F, const N: usize>(
         &mut self,
         items: &[T],
@@ -83,13 +113,12 @@ impl Matcher {
     ) where
         F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
     {
-        let mut scratch = ResolvedScratch::default();
-        self.match_list_resolved_into_with(
-            items,
-            item_index_offset,
-            resolve,
+        Self::guard_against_haystack_overflow(items.len(), item_index_offset);
+        let end = item_index_offset + items.len() as u32;
+        self.match_range_resolved_into(
+            item_index_offset..end,
+            &|index, buf| resolve(&items[(index - item_index_offset) as usize], buf),
             matches,
-            &mut scratch,
         );
     }
 
@@ -107,27 +136,23 @@ impl Matcher {
         }
     }
 
-    pub(super) fn match_list_resolved_into_with<T, F, const N: usize>(
+    pub(super) fn match_range_resolved_into_with<F, const N: usize>(
         &mut self,
-        items: &[T],
-        item_index_offset: u32,
+        range: Range<u32>,
         resolve: &F,
         matches: &mut Vec<Match>,
         scratch: &mut ResolvedScratch,
     ) where
-        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>,
+        F: Fn(u32, &mut [*const u8; N]) -> Option<(usize, u16)>,
     {
-        Self::guard_against_haystack_overflow(items.len(), item_index_offset);
         let mut chunk_ptrs = [core::ptr::null::<u8>(); N];
 
         // Empty patterns match every resolvable item
         if self.patterns.is_empty() {
             matches.extend(
-                items
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, item)| resolve(item, &mut chunk_ptrs).is_some())
-                    .map(|(i, _)| Match::from_index(i + item_index_offset as usize)),
+                range
+                    .filter(|&index| resolve(index, &mut chunk_ptrs).is_some())
+                    .map(|index| Match::from_index(index as usize)),
             );
             return;
         }
@@ -135,12 +160,16 @@ impl Matcher {
         let min_haystack_len = self.resolved_min_haystack_len();
         let ResolvedScratch { bytes, spans, hits } = scratch;
 
-        for (batch_idx, batch) in items.chunks(GATHER_BATCH).enumerate() {
+        let mut batch_start = range.start;
+        while batch_start < range.end {
+            let batch_end = batch_start
+                .saturating_add(GATHER_BATCH as u32)
+                .min(range.end);
             bytes.clear();
             spans.clear();
 
-            for (i, item) in batch.iter().enumerate() {
-                let Some((chunk_count, byte_len)) = resolve(item, &mut chunk_ptrs) else {
+            for index in batch_start..batch_end {
+                let Some((chunk_count, byte_len)) = resolve(index, &mut chunk_ptrs) else {
                     continue;
                 };
                 let len = byte_len as usize;
@@ -176,10 +205,10 @@ impl Matcher {
                     bytes.set_len(start + len);
                 }
 
-                let index = item_index_offset + (batch_idx * GATHER_BATCH + i) as u32;
                 spans.push((index, start as u32, len as u32));
             }
 
+            batch_start = batch_end;
             if spans.is_empty() {
                 continue;
             }
@@ -300,6 +329,44 @@ pub(crate) mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn range_api_matches_slice_api() {
+        let haystacks: Vec<String> = (0..GATHER_BATCH + 5)
+            .map(|i| {
+                if i % 7 == 0 {
+                    format!("abc_{i}")
+                } else {
+                    format!("zzz_{i}")
+                }
+            })
+            .collect();
+        let chunk_data: Vec<ChunkItem> = haystacks.iter().map(|s| string_to_chunks(s)).collect();
+        let config = Config::default().sort(SortStrategy::IndexAsc);
+
+        let by_slice =
+            Matcher::new("abc", &config).match_list_resolved(&chunk_data, &resolve_chunks::<2>);
+        let by_index = Matcher::new("abc", &config)
+            .match_range_resolved(chunk_data.len(), &|index, buf: &mut [*const u8; 2]| {
+                resolve_chunks(&chunk_data[index as usize], buf)
+            });
+        assert_eq!(by_slice, by_index);
+        assert!(!by_index.is_empty());
+
+        // Sub-range keeps global indices
+        let mut partial = Vec::new();
+        Matcher::new("abc", &config).match_range_resolved_into(
+            7..(GATHER_BATCH as u32 + 1),
+            &|index, buf: &mut [*const u8; 2]| resolve_chunks(&chunk_data[index as usize], buf),
+            &mut partial,
+        );
+        let expected: Vec<_> = by_index
+            .iter()
+            .copied()
+            .filter(|m| (7..GATHER_BATCH as u32 + 1).contains(&m.index))
+            .collect();
+        assert_eq!(partial, expected);
     }
 
     #[test]
