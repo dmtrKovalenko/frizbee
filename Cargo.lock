@@ -259,14 +259,14 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "frizbee-c"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "neo_frizbee",
 ]
 
 [[package]]
 name = "frizbee-py"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "neo_frizbee",
  "pyo3",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "frizbee-wasm"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "js-sys",
  "neo_frizbee",
@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "neo_frizbee"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "criterion",
  "nucleo",
