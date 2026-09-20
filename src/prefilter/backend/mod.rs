@@ -1,12 +1,8 @@
 use core::fmt::Debug;
 
-#[cfg(any(
-    test,
-    not(any(
-        all(target_arch = "wasm32", target_feature = "simd128"),
-        target_arch = "aarch64"
-    ))
-))]
+// on aarch64 every non-test kernel alias is a hand-rolled type, so the generic
+// prefilter is only named by the scalar alias that exists under `test`
+#[cfg(any(test, not(target_arch = "aarch64")))]
 use super::algo::Prefilter;
 
 #[cfg(target_arch = "x86_64")]
